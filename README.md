@@ -38,3 +38,4 @@ Then open http://localhost:3000 in your browser.
 - `lib/` — shared infrastructure
 - `trigger/` — background AI jobs
 - `prisma/` — database schema
+  The Original project is from https://youtu.be/14RP8liACqo?si=--5y1KlU3J3c5Cbe
