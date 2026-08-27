@@ -27,7 +27,9 @@ export async function POST(request: Request) {
   const body = await readJsonBody(request);
   const rawName = typeof body.name === "string" ? body.name.trim() : "";
   const name = rawName.length > 0 ? rawName : DEFAULT_PROJECT_NAME;
+  const rawId = typeof body.id === "string" ? body.id.trim() : "";
+  const id = rawId.length > 0 ? rawId : undefined;
 
-  const project = await createProject(ownerId, name);
+  const project = await createProject(ownerId, name, id);
   return Response.json(project, { status: 201 });
 }

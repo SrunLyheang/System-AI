@@ -11,9 +11,23 @@ export function listProjectsForOwner(ownerId: string) {
   });
 }
 
-/** Create a project owned by `ownerId`. The schema's `cuid()` default supplies the ID. */
-export function createProject(ownerId: string, name: string) {
-  return prisma.project.create({ data: { ownerId, name } });
+/** List the projects shared with `email` via a collaborator record, newest first. */
+export function listSharedProjects(email: string) {
+  return prisma.project.findMany({
+    where: { collaborators: { some: { email } } },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+/**
+ * Create a project owned by `ownerId`. When `id` is supplied it is used as the
+ * project ID so it stays aligned with the Liveblocks room ID the client derives
+ * from the project name; otherwise the schema's `cuid()` default supplies one.
+ */
+export function createProject(ownerId: string, name: string, id?: string) {
+  return prisma.project.create({
+    data: id ? { id, ownerId, name } : { ownerId, name },
+  });
 }
 
 /** Look up a single project by ID, or `null` when it does not exist. */

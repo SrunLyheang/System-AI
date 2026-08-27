@@ -2,29 +2,33 @@
 
 import { Pencil, Plus, Trash2, X } from "lucide-react"
 
-import { MOCK_PROJECTS, type MockProject } from "@/components/editor/mock-projects"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import type { EditorProject } from "@/hooks/use-project-actions"
 import { cn } from "@/lib/utils"
 
 interface ProjectSidebarProps {
   isOpen: boolean
   onClose: () => void
+  ownedProjects: EditorProject[]
+  sharedProjects: EditorProject[]
   onCreateProject: () => void
-  onRenameProject: (project: MockProject) => void
-  onDeleteProject: (project: MockProject) => void
+  onRenameProject: (project: EditorProject) => void
+  onDeleteProject: (project: EditorProject) => void
 }
 
 interface ProjectListProps {
-  projects: MockProject[]
+  projects: EditorProject[]
   emptyLabel: string
-  onRenameProject: (project: MockProject) => void
-  onDeleteProject: (project: MockProject) => void
+  showActions: boolean
+  onRenameProject: (project: EditorProject) => void
+  onDeleteProject: (project: EditorProject) => void
 }
 
 function ProjectList({
   projects,
   emptyLabel,
+  showActions,
   onRenameProject,
   onDeleteProject,
 }: ProjectListProps) {
@@ -44,7 +48,7 @@ function ProjectList({
           className="group flex items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-sm text-copy-secondary hover:bg-elevated"
         >
           <span className="truncate">{project.name}</span>
-          {project.ownership === "owned" ? (
+          {showActions ? (
             <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
               <Button
                 variant="ghost"
@@ -73,17 +77,12 @@ function ProjectList({
 function ProjectSidebar({
   isOpen,
   onClose,
+  ownedProjects,
+  sharedProjects,
   onCreateProject,
   onRenameProject,
   onDeleteProject,
 }: ProjectSidebarProps) {
-  const ownedProjects = MOCK_PROJECTS.filter(
-    (project) => project.ownership === "owned"
-  )
-  const sharedProjects = MOCK_PROJECTS.filter(
-    (project) => project.ownership === "shared"
-  )
-
   return (
     <>
       {isOpen ? (
@@ -128,6 +127,7 @@ function ProjectSidebar({
             <ProjectList
               projects={ownedProjects}
               emptyLabel="No projects yet"
+              showActions
               onRenameProject={onRenameProject}
               onDeleteProject={onDeleteProject}
             />
@@ -139,6 +139,7 @@ function ProjectSidebar({
             <ProjectList
               projects={sharedProjects}
               emptyLabel="No shared projects yet"
+              showActions={false}
               onRenameProject={onRenameProject}
               onDeleteProject={onDeleteProject}
             />
