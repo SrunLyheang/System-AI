@@ -4,11 +4,11 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Phase
 
-- Persistence — Prisma data models, client singleton, first migration (`context/feature-specs/05-prisma.md`) — done
+- Project APIs — backend REST route handlers for project CRUD (`context/feature-specs/06-projectapis.md`) — done
 
 ## Current Goal
 
-- Define the immediate implementation goal here.
+- Wire the project API routes into the `/editor` UI (replace `components/editor/mock-projects.ts`).
 
 ## Completed
 
@@ -24,6 +24,10 @@ Update this file whenever the current phase, active feature, or implementation s
 - Persistence (`context/feature-specs/05-prisma.md`): `prisma/models/project.prisma` (multi-file schema, picked up by `prisma.config.ts` `schema: "prisma/"`) — `ProjectStatus` enum (`DRAFT`, `ARCHIVED`), `Project` model (`ownerId` = Clerk user ID, `name`, optional `description`, `status @default(DRAFT)`, optional `canvasJsonPath` for the future canvas blob URL, `createdAt`/`updatedAt` timestamps, `@@index([ownerId])` + `@@index([createdAt])`), `ProjectCollaborator` model (`projectId` relation to `Project` with `onDelete: Cascade`, `email`, `createdAt`, `@@unique([projectId, email])`, `@@index([email])` + `@@index([projectId, createdAt])`). `lib/prisma.ts` — cached singleton branching on `DATABASE_URL`: `prisma+postgres://` → `new PrismaClient({ accelerateUrl }).$extends(withAccelerate())`, otherwise `new PrismaClient({ adapter: new PrismaPg({ connectionString }) })`; client cached on `globalThis` outside production for hot-reload. First migration `prisma/migrations/20260827092154_init/` applied to the Prisma Postgres database; client generated to `app/generated/prisma/` (gitignored). Active `.env` `DATABASE_URL` is a `postgres://` direct-TCP string, so the `@prisma/adapter-pg` branch is the one exercised at runtime.
 - Dependencies: spec listed `prisma`, `@prisma/client`, `@prisma/adapter-pg`, `pg` as already installed; `prisma` (CLI) was in fact missing and `@prisma/extension-accelerate` is required by the Accelerate branch — both added (`prisma` as devDependency, `@prisma/extension-accelerate` as dependency).
 - Verified: `tsc --noEmit`, `eslint lib/prisma.ts --max-warnings=0`, `prisma validate`, `prisma migrate dev`, and `npm run build` all pass clean.
+- Project APIs (`context/feature-specs/06-projectapis.md`): backend-only project CRUD route handlers, no UI wiring. `lib/auth.ts` (`getAuthenticatedUserId()` — wraps Clerk `auth()`, returns `userId | null` so handlers emit their own JSON `401`), `lib/http.ts` (`readJsonBody()` — tolerant JSON body parser returning `{}` on absent/invalid/non-object bodies), `lib/projects.ts` (`DEFAULT_PROJECT_NAME = "Untitled Project"` + thin Prisma data helpers: `listProjectsForOwner` ordered `createdAt desc`, `createProject`, `findProjectById`, `renameProject`, `deleteProject` — schema `cuid()` supplies IDs). `app/api/projects/route.ts` — `GET` lists the caller's projects, `POST` creates one with `ownerId` = Clerk user ID, defaulting a missing/blank `name` to `Untitled Project` (`201`). `app/api/projects/[projectId]/route.ts` — `PATCH` renames (`400` on blank `name`), `DELETE` removes (`204`); both load the project, return `404` when absent and `403` when `ownerId !== userId`, else mutate. All four handlers return `401` when unauthenticated.
+- `proxy.ts`: `/api/(.*)` now excluded from `clerkMiddleware` `auth.protect()` — API handlers enforce auth themselves; without this, Clerk answers non-page requests with a bare `404` instead of the spec-required `401`.
+- `lib/prisma.ts`: exported `prisma` singleton retyped from the `ReturnType<typeof createPrismaClient>` union to plain `PrismaClient` (accelerate branch cast) so `prisma.project.*` is callable from consumers — the two connection branches previously produced an incompatible union.
+- Verified: `tsc --noEmit`, `eslint app/api lib proxy.ts --max-warnings=0`, and `npm run build` all pass clean; `/api/projects` and `/api/projects/[projectId]` appear in the build route table.
 
 ## In Progress
 
@@ -32,7 +36,7 @@ Update this file whenever the current phase, active feature, or implementation s
 ## Next Up
 
 - Build out the actual `/editor` experience (currently just navbar + sidebar shell, no canvas).
-- Wire project CRUD API routes / persistence onto the new Prisma models (replace `components/editor/mock-projects.ts`).
+- Wire the project CRUD API routes into the `/editor` UI (replace `components/editor/mock-projects.ts`).
 
 ## Open Questions
 
@@ -42,6 +46,7 @@ Update this file whenever the current phase, active feature, or implementation s
 
 - Dark theme tokens (`--bg-*`, `--text-*`, `--accent-*`, `--state-*`) live in `app/globals.css` `:root` and are mapped onto shadcn's standard semantic tokens (`--background`, `--foreground`, `--card`, `--primary`, etc.) so every shadcn component is dark by default with no `.dark` class needed — the app has no light mode.
 - Prisma runs on the v7 `prisma-client` generator (ESM, output `app/generated/prisma/`, gitignored) with driver adapters — no Rust query engine. `lib/prisma.ts` picks the connection path from `DATABASE_URL` at startup: an Accelerate URL (`prisma+postgres://`) uses `accelerateUrl` + `withAccelerate()`, anything else uses `@prisma/adapter-pg` for a direct connection. Datasource URL lives in `prisma.config.ts` (loaded via `dotenv/config`), not in `schema.prisma`.
+- API route handlers own their auth: `proxy.ts` skips `auth.protect()` for `/api/(.*)` and each handler calls `getAuthenticatedUserId()` and returns a JSON `401` itself. Reason — `clerkMiddleware`'s `auth.protect()` resolves an unauthenticated non-page request with `notFound()` (a bare `404`), which conflicts with the API contract's `401`. Page routes are still protected at the proxy.
 - Do not register a custom Tailwind color theme key named `base` (e.g. `--color-base`). It collides with Tailwind's built-in `text-base` font-size utility (both compile to a class literally named `.text-base`), and the color definition wins — silently turning every `text-base` usage across shadcn components into a text-color rule instead of a font-size rule. Discovered when `CardTitle` rendered nearly invisible (dark-on-dark). The `bg-background` utility (already mapped to the same page-background value) covers the same need without the collision.
 
 ## Session Notes
