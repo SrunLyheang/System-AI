@@ -19,7 +19,7 @@ export async function getCurrentIdentity(): Promise<ClerkIdentity | null> {
   }
   return {
     userId: user.id,
-    email: user.primaryEmailAddress?.emailAddress ?? "",
+    email: user.primaryEmailAddress?.emailAddress?.toLowerCase() ?? "",
   };
 }
 

@@ -4,7 +4,7 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Phase
 
-- Invite accept/decline (follow-up to spec 09) — invites are now explicit: an invited email gets a pending `ProjectCollaborator` row that grants no access until accepted from an "Invites" tab in the `/editor` sidebar — done
+- Invite accept/decline (follow-up to spec 09) — invites are now explicit: an invited email gets a pending `ProjectCollaborator` row that grants no access until accepted from the "Pending invites" section in the `/editor` sidebar — done
 
 ## Current Goal
 

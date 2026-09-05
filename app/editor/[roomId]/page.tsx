@@ -6,7 +6,11 @@ import {
   getAccessibleProject,
   getCurrentIdentity,
 } from "@/lib/project-access"
-import { listProjectsForOwner, listSharedProjects } from "@/lib/projects"
+import {
+  listPendingInvites,
+  listProjectsForOwner,
+  listSharedProjects,
+} from "@/lib/projects"
 
 interface WorkspacePageProps {
   params: Promise<{ roomId: string }>
@@ -24,9 +28,10 @@ async function WorkspacePage({ params }: WorkspacePageProps) {
     return <AccessDenied />
   }
 
-  const [owned, shared] = await Promise.all([
+  const [owned, shared, invited] = await Promise.all([
     listProjectsForOwner(identity.userId),
     identity.email ? listSharedProjects(identity.email) : Promise.resolve([]),
+    identity.email ? listPendingInvites(identity.email) : Promise.resolve([]),
   ])
 
   return (
@@ -34,6 +39,7 @@ async function WorkspacePage({ params }: WorkspacePageProps) {
       project={{ id: project.id, name: project.name }}
       ownedProjects={owned.map((p) => ({ id: p.id, name: p.name }))}
       sharedProjects={shared.map((p) => ({ id: p.id, name: p.name }))}
+      pendingInvites={invited.map((p) => ({ id: p.id, name: p.name }))}
       canManageShare={project.ownerId === identity.userId}
     />
   )
