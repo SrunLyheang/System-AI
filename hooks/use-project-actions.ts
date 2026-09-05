@@ -104,9 +104,10 @@ export function useProjectActions(): UseProjectActions {
         setIsLoading(false)
         return
       }
-      // TODO: push to `/editor/${project.id}` once the workspace route exists.
+      // Project ID is kept equal to the room ID we sent, so navigate straight
+      // to the new workspace.
       close()
-      router.refresh()
+      router.push(`/editor/${roomId}`)
     } catch {
       setIsLoading(false)
     }

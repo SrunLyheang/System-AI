@@ -11,10 +11,18 @@ export function listProjectsForOwner(ownerId: string) {
   });
 }
 
-/** List the projects shared with `email` via a collaborator record, newest first. */
+/** List the projects `email` has an *accepted* collaborator record on, newest first. */
 export function listSharedProjects(email: string) {
   return prisma.project.findMany({
-    where: { collaborators: { some: { email } } },
+    where: { collaborators: { some: { email, acceptedAt: { not: null } } } },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+/** List the projects `email` has been invited to but has not accepted yet, newest first. */
+export function listPendingInvites(email: string) {
+  return prisma.project.findMany({
+    where: { collaborators: { some: { email, acceptedAt: null } } },
     orderBy: { createdAt: "desc" },
   });
 }

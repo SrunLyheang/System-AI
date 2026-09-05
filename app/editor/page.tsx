@@ -2,7 +2,11 @@ import { currentUser } from "@clerk/nextjs/server"
 import { redirect } from "next/navigation"
 
 import { EditorShell } from "@/components/editor/editor-shell"
-import { listProjectsForOwner, listSharedProjects } from "@/lib/projects"
+import {
+  listPendingInvites,
+  listProjectsForOwner,
+  listSharedProjects,
+} from "@/lib/projects"
 
 async function EditorPage() {
   const user = await currentUser()
@@ -11,24 +15,22 @@ async function EditorPage() {
   }
 
   const email = user.primaryEmailAddress?.emailAddress ?? ""
-  const [owned, shared] = await Promise.all([
+  const [owned, shared, invited] = await Promise.all([
     listProjectsForOwner(user.id),
     email ? listSharedProjects(email) : Promise.resolve([]),
+    email ? listPendingInvites(email) : Promise.resolve([]),
   ])
 
-  const ownedProjects = owned.map((project) => ({
+  const toEditorProject = (project: { id: string; name: string }) => ({
     id: project.id,
     name: project.name,
-  }))
-  const sharedProjects = shared.map((project) => ({
-    id: project.id,
-    name: project.name,
-  }))
+  })
 
   return (
     <EditorShell
-      ownedProjects={ownedProjects}
-      sharedProjects={sharedProjects}
+      ownedProjects={owned.map(toEditorProject)}
+      sharedProjects={shared.map(toEditorProject)}
+      pendingInvites={invited.map(toEditorProject)}
     />
   )
 }

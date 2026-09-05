@@ -16,9 +16,14 @@ import {
 interface EditorShellProps {
   ownedProjects: EditorProject[]
   sharedProjects: EditorProject[]
+  pendingInvites: EditorProject[]
 }
 
-function EditorShell({ ownedProjects, sharedProjects }: EditorShellProps) {
+function EditorShell({
+  ownedProjects,
+  sharedProjects,
+  pendingInvites,
+}: EditorShellProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const actions = useProjectActions()
 
@@ -37,6 +42,7 @@ function EditorShell({ ownedProjects, sharedProjects }: EditorShellProps) {
         onClose={() => setIsSidebarOpen(false)}
         ownedProjects={ownedProjects}
         sharedProjects={sharedProjects}
+        pendingInvites={pendingInvites}
         onCreateProject={actions.openCreate}
         onRenameProject={actions.openRename}
         onDeleteProject={actions.openDelete}
