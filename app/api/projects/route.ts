@@ -1,5 +1,5 @@
 import { getAuthenticatedUserId } from "@/lib/auth";
-import { readJsonBody } from "@/lib/http";
+import { InvalidJsonBodyError, readJsonBody } from "@/lib/http";
 import {
   createProject,
   DEFAULT_PROJECT_NAME,
@@ -24,7 +24,15 @@ export async function POST(request: Request) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = await readJsonBody(request);
+  let body: Record<string, unknown>;
+  try {
+    body = await readJsonBody(request);
+  } catch (error) {
+    if (error instanceof InvalidJsonBodyError) {
+      return Response.json({ error: error.message }, { status: 400 });
+    }
+    throw error;
+  }
   const rawName = typeof body.name === "string" ? body.name.trim() : "";
   const name = rawName.length > 0 ? rawName : DEFAULT_PROJECT_NAME;
   const rawId = typeof body.id === "string" ? body.id.trim() : "";

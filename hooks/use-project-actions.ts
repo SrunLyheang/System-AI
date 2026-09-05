@@ -104,9 +104,9 @@ export function useProjectActions(): UseProjectActions {
         setIsLoading(false)
         return
       }
-      const project = (await response.json()) as EditorProject
+      // TODO: push to `/editor/${project.id}` once the workspace route exists.
       close()
-      router.push(`/editor/${project.id}`)
+      router.refresh()
     } catch {
       setIsLoading(false)
     }

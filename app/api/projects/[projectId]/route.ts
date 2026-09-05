@@ -1,5 +1,5 @@
 import { getAuthenticatedUserId } from "@/lib/auth";
-import { readJsonBody } from "@/lib/http";
+import { InvalidJsonBodyError, readJsonBody } from "@/lib/http";
 import {
   deleteProject,
   findProjectById,
@@ -17,7 +17,15 @@ export async function PATCH(request: Request, { params }: Context) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = await readJsonBody(request);
+  let body: Record<string, unknown>;
+  try {
+    body = await readJsonBody(request);
+  } catch (error) {
+    if (error instanceof InvalidJsonBodyError) {
+      return Response.json({ error: error.message }, { status: 400 });
+    }
+    throw error;
+  }
   const name = typeof body.name === "string" ? body.name.trim() : "";
   if (name.length === 0) {
     return Response.json({ error: "name is required" }, { status: 400 });

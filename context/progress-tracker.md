@@ -43,7 +43,7 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Next Up
 
-- Build the `/editor/[projectId]` workspace / canvas (create currently navigates there; route does not exist yet).
+- Build the `/editor/[projectId]` workspace / canvas. Create currently refreshes `/editor` on success instead of navigating to the workspace route (which doesn't exist yet) — re-enable `router.push('/editor/<id>')` in `hooks/use-project-actions.ts` once that route ships.
 
 ## Open Questions
 
