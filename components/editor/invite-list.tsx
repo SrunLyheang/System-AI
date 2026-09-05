@@ -20,13 +20,21 @@ interface InviteListProps {
 function InviteList({ invites }: InviteListProps) {
   const router = useRouter()
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   async function act(projectId: string, method: "PATCH" | "DELETE") {
     if (busyId) return
     setBusyId(projectId)
+    setError(null)
     try {
       const response = await fetch(`/api/invites/${projectId}`, { method })
-      if (response.ok) router.refresh()
+      if (response.ok) {
+        router.refresh()
+      } else {
+        setError("Could not update that invite. Try again.")
+      }
+    } catch {
+      setError("Could not update that invite. Try again.")
     } finally {
       setBusyId(null)
     }
@@ -35,6 +43,7 @@ function InviteList({ invites }: InviteListProps) {
   return (
     <div className="border-t border-surface-border-subtle px-4 py-3">
       <p className="text-xs font-medium text-copy-muted">Pending invites</p>
+      {error ? <p className="mt-1 text-xs text-error">{error}</p> : null}
       <ul className="mt-1 flex max-h-44 flex-col divide-y divide-surface-border-subtle overflow-y-auto">
         {invites.map((invite) => (
           <li

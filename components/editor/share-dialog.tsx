@@ -1,34 +1,34 @@
-"use client"
+"use client";
 
-import { useCallback, useEffect, useState } from "react"
-import type { FormEvent } from "react"
+import { useCallback, useEffect, useState } from "react";
+import type { FormEvent } from "react";
 
-import { Check, Link2, X } from "lucide-react"
+import { Check, Link2, X } from "lucide-react";
 
-import { EditorDialog } from "@/components/editor/editor-dialog"
-import { Button } from "@/components/ui/button"
-import { DialogClose } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
+import { EditorDialog } from "@/components/editor/editor-dialog";
+import { Button } from "@/components/ui/button";
+import { DialogClose } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 
 interface Collaborator {
-  email: string
-  name: string | null
-  imageUrl: string | null
-  pending: boolean
+  email: string;
+  name: string | null;
+  imageUrl: string | null;
+  pending: boolean;
 }
 
 interface ShareDialogProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  projectId: string
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  projectId: string;
   /** True when the current user owns the project and may invite/remove. */
-  canManage: boolean
+  canManage: boolean;
 }
 
 function CollaboratorAvatar({ collaborator }: { collaborator: Collaborator }) {
   const initial = (collaborator.name ?? collaborator.email)
     .charAt(0)
-    .toUpperCase()
+    .toUpperCase();
   if (collaborator.imageUrl) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
@@ -37,13 +37,13 @@ function CollaboratorAvatar({ collaborator }: { collaborator: Collaborator }) {
         alt=""
         className="size-7 shrink-0 rounded-full object-cover"
       />
-    )
+    );
   }
   return (
     <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-subtle text-xs font-medium text-copy-secondary">
       {initial}
     </span>
-  )
+  );
 }
 
 function ShareDialog({
@@ -52,59 +52,61 @@ function ShareDialog({
   projectId,
   canManage,
 }: ShareDialogProps) {
-  const [collaborators, setCollaborators] = useState<Collaborator[]>([])
-  const [email, setEmail] = useState("")
-  const [error, setError] = useState<string | null>(null)
-  const [isInviting, setIsInviting] = useState(false)
-  const [copied, setCopied] = useState(false)
+  const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
+  const [email, setEmail] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [isInviting, setIsInviting] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
-    const response = await fetch(`/api/projects/${projectId}/collaborators`)
-    if (!response.ok) return
-    const data = (await response.json()) as { collaborators: Collaborator[] }
-    setCollaborators(data.collaborators)
-  }, [projectId])
+    const response = await fetch(`/api/projects/${projectId}/collaborators`);
+    if (!response.ok) return;
+    const data = (await response.json()) as { collaborators: Collaborator[] };
+    setCollaborators(data.collaborators);
+  }, [projectId]);
 
   // Reset the form each time the dialog transitions to open (React's documented
   // "adjust state on prop change" pattern — runs during render, not in an effect).
-  const [wasOpen, setWasOpen] = useState(open)
+  const [wasOpen, setWasOpen] = useState(open);
   if (open !== wasOpen) {
-    setWasOpen(open)
+    setWasOpen(open);
     if (open) {
-      setError(null)
-      setEmail("")
+      setError(null);
+      setEmail("");
     }
   }
 
   useEffect(() => {
     // Fetch the collaborator list from the server whenever the dialog opens.
     // eslint-disable-next-line react-hooks/set-state-in-effect -- async fetch, state set in a later tick
-    if (open) void load()
-  }, [open, load])
+    if (open) void load();
+  }, [open, load]);
 
   async function handleInvite(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const next = email.trim()
-    if (isInviting || next.length === 0) return
-    setIsInviting(true)
-    setError(null)
+    event.preventDefault();
+    const next = email.trim();
+    if (isInviting || next.length === 0) return;
+    setIsInviting(true);
+    setError(null);
     try {
       const response = await fetch(`/api/projects/${projectId}/collaborators`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: next }),
-      })
+      });
       if (!response.ok) {
-        const data = (await response.json().catch(() => null)) as
-          | { error?: string }
-          | null
-        setError(data?.error ?? "Could not invite that person.")
-        return
+        const data = (await response.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        setError(data?.error ?? "Could not invite that person.");
+        return;
       }
-      setEmail("")
-      await load()
+      setEmail("");
+      await load();
+    } catch {
+      setError("Could not invite that person.");
     } finally {
-      setIsInviting(false)
+      setIsInviting(false);
     }
   }
 
@@ -112,15 +114,15 @@ function ShareDialog({
     const response = await fetch(
       `/api/projects/${projectId}/collaborators?email=${encodeURIComponent(target)}`,
       { method: "DELETE" },
-    )
-    if (response.ok) await load()
+    );
+    if (response.ok) await load();
   }
 
   function handleCopyLink() {
-    const link = `${window.location.origin}/editor/${projectId}`
-    void navigator.clipboard.writeText(link)
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 2000)
+    const link = `${window.location.origin}/editor/${projectId}`;
+    void navigator.clipboard.writeText(link);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2000);
   }
 
   return (
@@ -216,7 +218,7 @@ function ShareDialog({
         </ul>
       </div>
     </EditorDialog>
-  )
+  );
 }
 
-export { ShareDialog }
+export { ShareDialog };

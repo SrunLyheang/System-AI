@@ -25,6 +25,8 @@ interface WorkspaceShellProps {
   project: EditorProject
   ownedProjects: EditorProject[]
   sharedProjects: EditorProject[]
+  /** Pending (unaccepted) invites for the current user. */
+  pendingInvites?: EditorProject[]
   /** True when the current user owns this project (may invite/remove collaborators). */
   canManageShare: boolean
 }
@@ -33,6 +35,7 @@ function WorkspaceShell({
   project,
   ownedProjects,
   sharedProjects,
+  pendingInvites = [],
   canManageShare,
 }: WorkspaceShellProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
@@ -90,6 +93,7 @@ function WorkspaceShell({
         onClose={() => setIsSidebarOpen(false)}
         ownedProjects={ownedProjects}
         sharedProjects={sharedProjects}
+        pendingInvites={pendingInvites}
         activeProjectId={project.id}
         onCreateProject={actions.openCreate}
         onRenameProject={actions.openRename}
