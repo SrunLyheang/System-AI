@@ -1,7 +1,9 @@
 "use client"
 
+import Link from "next/link"
 import { Pencil, Plus, Trash2, X } from "lucide-react"
 
+import { InviteList } from "@/components/editor/invite-list"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { EditorProject } from "@/hooks/use-project-actions"
@@ -12,6 +14,10 @@ interface ProjectSidebarProps {
   onClose: () => void
   ownedProjects: EditorProject[]
   sharedProjects: EditorProject[]
+  /** Pending (unaccepted) invites for the current user. Adds an "Invites" tab when non-empty. */
+  pendingInvites?: EditorProject[]
+  /** ID of the project whose workspace is currently open, if any. */
+  activeProjectId?: string
   onCreateProject: () => void
   onRenameProject: (project: EditorProject) => void
   onDeleteProject: (project: EditorProject) => void
@@ -21,6 +27,9 @@ interface ProjectListProps {
   projects: EditorProject[]
   emptyLabel: string
   showActions: boolean
+  activeProjectId?: string
+  /** Called after a project link is followed, e.g. to close the mobile drawer. */
+  onNavigate: () => void
   onRenameProject: (project: EditorProject) => void
   onDeleteProject: (project: EditorProject) => void
 }
@@ -29,6 +38,8 @@ function ProjectList({
   projects,
   emptyLabel,
   showActions,
+  activeProjectId,
+  onNavigate,
   onRenameProject,
   onDeleteProject,
 }: ProjectListProps) {
@@ -45,9 +56,19 @@ function ProjectList({
       {projects.map((project) => (
         <li
           key={project.id}
-          className="group flex items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-sm text-copy-secondary hover:bg-elevated"
+          aria-current={project.id === activeProjectId ? "page" : undefined}
+          className={cn(
+            "group flex items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-sm text-copy-secondary hover:bg-elevated",
+            project.id === activeProjectId && "bg-elevated text-copy-primary"
+          )}
         >
-          <span className="truncate">{project.name}</span>
+          <Link
+            href={`/editor/${project.id}`}
+            onClick={onNavigate}
+            className="min-w-0 flex-1 truncate outline-none focus-visible:underline"
+          >
+            {project.name}
+          </Link>
           {showActions ? (
             <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
               <Button
@@ -79,6 +100,8 @@ function ProjectSidebar({
   onClose,
   ownedProjects,
   sharedProjects,
+  pendingInvites = [],
+  activeProjectId,
   onCreateProject,
   onRenameProject,
   onDeleteProject,
@@ -128,6 +151,8 @@ function ProjectSidebar({
               projects={ownedProjects}
               emptyLabel="No projects yet"
               showActions
+              activeProjectId={activeProjectId}
+              onNavigate={onClose}
               onRenameProject={onRenameProject}
               onDeleteProject={onDeleteProject}
             />
@@ -140,11 +165,17 @@ function ProjectSidebar({
               projects={sharedProjects}
               emptyLabel="No shared projects yet"
               showActions={false}
+              activeProjectId={activeProjectId}
+              onNavigate={onClose}
               onRenameProject={onRenameProject}
               onDeleteProject={onDeleteProject}
             />
           </TabsContent>
         </Tabs>
+
+        {pendingInvites.length > 0 ? (
+          <InviteList invites={pendingInvites} />
+        ) : null}
 
         <div className="border-t border-surface-border-subtle p-4">
           <Button className="w-full" onClick={onCreateProject}>
