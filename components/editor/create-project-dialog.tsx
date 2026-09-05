@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input"
 interface CreateProjectDialogProps {
   open: boolean
   name: string
-  slugPreview: string
+  roomIdPreview: string
   isLoading: boolean
   onOpenChange: (open: boolean) => void
   onNameChange: (value: string) => void
@@ -20,7 +20,7 @@ interface CreateProjectDialogProps {
 function CreateProjectDialog({
   open,
   name,
-  slugPreview,
+  roomIdPreview,
   isLoading,
   onOpenChange,
   onNameChange,
@@ -31,15 +31,15 @@ function CreateProjectDialog({
     onSubmit()
   }
 
-  const hasEmptySlug = name.trim().length > 0 && slugPreview.length === 0
-  const canSubmit = !isLoading && slugPreview.length > 0
+  const hasEmptySlug = name.trim().length > 0 && roomIdPreview.length === 0
+  const canSubmit = !isLoading && roomIdPreview.length > 0
 
   return (
     <EditorDialog
       open={open}
       onOpenChange={onOpenChange}
       title="Create project"
-      description="Name your project. Its slug is generated from the name."
+      description="Name your project. Its room ID is generated from the name."
       footer={
         <>
           <DialogClose render={<Button type="button" variant="outline" />}>
@@ -68,14 +68,14 @@ function CreateProjectDialog({
           />
         </div>
         <p className="text-xs text-copy-muted">
-          Slug preview:{" "}
+          Room ID:{" "}
           <span className="font-mono text-copy-secondary">
-            {slugPreview || "—"}
+            {roomIdPreview || "—"}
           </span>
         </p>
         {hasEmptySlug ? (
           <p className="text-xs text-error">
-            Add at least one letter or number so the project has a valid slug.
+            Add at least one letter or number so the project has a valid room ID.
           </p>
         ) : null}
         <button type="submit" className="sr-only" tabIndex={-1} aria-hidden>

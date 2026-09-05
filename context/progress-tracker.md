@@ -4,11 +4,11 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Phase
 
-- Persistence — Prisma data models, client singleton, first migration (`context/feature-specs/05-prisma.md`) — done
+- Wire editor home (`context/feature-specs/07- wire-edit-home.md`) — editor home sidebar + dialogs wired to the real project CRUD API — done
 
 ## Current Goal
 
-- Define the immediate implementation goal here.
+- Build out the actual `/editor/[projectId]` workspace (canvas), which project create now navigates to.
 
 ## Completed
 
@@ -24,6 +24,18 @@ Update this file whenever the current phase, active feature, or implementation s
 - Persistence (`context/feature-specs/05-prisma.md`): `prisma/models/project.prisma` (multi-file schema, picked up by `prisma.config.ts` `schema: "prisma/"`) — `ProjectStatus` enum (`DRAFT`, `ARCHIVED`), `Project` model (`ownerId` = Clerk user ID, `name`, optional `description`, `status @default(DRAFT)`, optional `canvasJsonPath` for the future canvas blob URL, `createdAt`/`updatedAt` timestamps, `@@index([ownerId])` + `@@index([createdAt])`), `ProjectCollaborator` model (`projectId` relation to `Project` with `onDelete: Cascade`, `email`, `createdAt`, `@@unique([projectId, email])`, `@@index([email])` + `@@index([projectId, createdAt])`). `lib/prisma.ts` — cached singleton branching on `DATABASE_URL`: `prisma+postgres://` → `new PrismaClient({ accelerateUrl }).$extends(withAccelerate())`, otherwise `new PrismaClient({ adapter: new PrismaPg({ connectionString }) })`; client cached on `globalThis` outside production for hot-reload. First migration `prisma/migrations/20260827092154_init/` applied to the Prisma Postgres database; client generated to `app/generated/prisma/` (gitignored). Active `.env` `DATABASE_URL` is a `postgres://` direct-TCP string, so the `@prisma/adapter-pg` branch is the one exercised at runtime.
 - Dependencies: spec listed `prisma`, `@prisma/client`, `@prisma/adapter-pg`, `pg` as already installed; `prisma` (CLI) was in fact missing and `@prisma/extension-accelerate` is required by the Accelerate branch — both added (`prisma` as devDependency, `@prisma/extension-accelerate` as dependency).
 - Verified: `tsc --noEmit`, `eslint lib/prisma.ts --max-warnings=0`, `prisma validate`, `prisma migrate dev`, and `npm run build` all pass clean.
+- Project APIs (`context/feature-specs/06-projectapis.md`): backend-only project CRUD route handlers, no UI wiring. `lib/auth.ts` (`getAuthenticatedUserId()` — wraps Clerk `auth()`, returns `userId | null` so handlers emit their own JSON `401`), `lib/http.ts` (`readJsonBody()` — tolerant JSON body parser returning `{}` on absent/invalid/non-object bodies), `lib/projects.ts` (`DEFAULT_PROJECT_NAME = "Untitled Project"` + thin Prisma data helpers: `listProjectsForOwner` ordered `createdAt desc`, `createProject`, `findProjectById`, `renameProject`, `deleteProject` — schema `cuid()` supplies IDs). `app/api/projects/route.ts` — `GET` lists the caller's projects, `POST` creates one with `ownerId` = Clerk user ID, defaulting a missing/blank `name` to `Untitled Project` (`201`). `app/api/projects/[projectId]/route.ts` — `PATCH` renames (`400` on blank `name`), `DELETE` removes (`204`); both load the project, return `404` when absent and `403` when `ownerId !== userId`, else mutate. All four handlers return `401` when unauthenticated.
+- `proxy.ts`: `/api/(.*)` now excluded from `clerkMiddleware` `auth.protect()` — API handlers enforce auth themselves; without this, Clerk answers non-page requests with a bare `404` instead of the spec-required `401`.
+- `lib/prisma.ts`: exported `prisma` singleton retyped from the `ReturnType<typeof createPrismaClient>` union to plain `PrismaClient` (accelerate branch cast) so `prisma.project.*` is callable from consumers — the two connection branches previously produced an incompatible union.
+- Verified: `tsc --noEmit`, `eslint app/api lib proxy.ts --max-warnings=0`, and `npm run build` all pass clean; `/api/projects` and `/api/projects/[projectId]` appear in the build route table.
+- Wire editor home (`context/feature-specs/07- wire-edit-home.md`): editor home sidebar + dialogs now run against the real project CRUD API, `components/editor/mock-projects.ts` and `components/editor/use-project-dialogs.ts` deleted.
+  - `app/editor/page.tsx` is now a server component: `currentUser()` → `listProjectsForOwner(user.id)` + `listSharedProjects(primaryEmail)` in parallel, mapped to `{ id, name }` and passed to a new client `components/editor/editor-shell.tsx` (the old page body — sidebar-open state, dialog wiring). No client-side fetch on initial load.
+  - `lib/projects.ts`: added `listSharedProjects(email)` (projects with a `ProjectCollaborator` row matching the caller's email); `createProject` gained an optional `id` param.
+  - `app/api/projects/route.ts` `POST`: reads an optional `id` from the body and forwards it to `createProject` (still falls back to the schema `cuid()` when absent).
+  - `hooks/use-project-actions.ts` (new — the spec's "Use Project Actions"): owns dialog state + real mutations. Create — stable per-open suffix (`crypto.randomUUID().slice(0,8)`), `roomId = slugify(name)-suffix`, `POST /api/projects` with `{ id: roomId, name }`, then `router.push('/editor/<project.id>')`. Rename — `PATCH /api/projects/<id>` then `router.refresh()`. Delete — `DELETE /api/projects/<id>`, then `router.push('/editor')` if the deleted project is the active `/editor/<id>` workspace (matched off `usePathname()`), else `router.refresh()`.
+  - `components/editor/project-sidebar.tsx`: takes `ownedProjects` / `sharedProjects: EditorProject[]` props instead of reading a mock fixture; rename/delete row actions gated by a `showActions` prop (owned list only).
+  - `components/editor/create-project-dialog.tsx`: `slugPreview` prop → `roomIdPreview`; label "Slug preview" → "Room ID". Rename/delete dialogs unchanged (already pre-fill current name / show project name).
+- Verified: `npm run build` (TypeScript included) and `eslint app components lib hooks --max-warnings=0` pass clean; `/editor` is now `ƒ` (dynamic) in the route table.
 
 ## In Progress
 
@@ -31,17 +43,19 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Next Up
 
-- Build out the actual `/editor` experience (currently just navbar + sidebar shell, no canvas).
-- Wire project CRUD API routes / persistence onto the new Prisma models (replace `components/editor/mock-projects.ts`).
+- Build the `/editor/[projectId]` workspace / canvas. Create currently refreshes `/editor` on success instead of navigating to the workspace route (which doesn't exist yet) — re-enable `router.push('/editor/<id>')` in `hooks/use-project-actions.ts` once that route ships.
 
 ## Open Questions
 
+- Resolved (spec 07 ambiguities): "slugify the name to create the room ID" + "project ID and Liveblocks room ID should stay aligned" — with a `cuid()`-generating API, alignment is achieved by having the client send `roomId` as the project `id` on `POST /api/projects` (API keeps `cuid()` as the fallback). "Navigate to the new workspace" → `router.push('/editor/<id>')`; the workspace page itself is out of scope (see Next Up). "Shared projects" → `ProjectCollaborator` is keyed by email, so shared = collaborator row matching the Clerk user's primary email.
 - Resolved: `.env.local` now has real Clerk keys plus `NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in` and `NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up`. Without those two, `proxy.ts`'s public-route matcher silently matched nothing (`"undefined(.*)"`), so `/sign-in`/`/sign-up` were treated as protected and Clerk fell back to redirecting through its hosted Account Portal (`accounts.dev`) instead of the local pages — also the cause of the "Failed to fetch RSC payload" console error during that cross-origin redirect. Also added `afterSignOutUrl="/sign-in"` on `ClerkProvider` in `app/layout.tsx` so sign-out navigates straight to the public sign-in route instead of through the protected `/`.
 
 ## Architecture Decisions
 
 - Dark theme tokens (`--bg-*`, `--text-*`, `--accent-*`, `--state-*`) live in `app/globals.css` `:root` and are mapped onto shadcn's standard semantic tokens (`--background`, `--foreground`, `--card`, `--primary`, etc.) so every shadcn component is dark by default with no `.dark` class needed — the app has no light mode.
 - Prisma runs on the v7 `prisma-client` generator (ESM, output `app/generated/prisma/`, gitignored) with driver adapters — no Rust query engine. `lib/prisma.ts` picks the connection path from `DATABASE_URL` at startup: an Accelerate URL (`prisma+postgres://`) uses `accelerateUrl` + `withAccelerate()`, anything else uses `@prisma/adapter-pg` for a direct connection. Datasource URL lives in `prisma.config.ts` (loaded via `dotenv/config`), not in `schema.prisma`.
+- Editor home is a server component (`app/editor/page.tsx`) that fetches owned + shared projects with the `lib/projects` helpers and hands them to a `"use client"` shell (`components/editor/editor-shell.tsx`). Client mutations go through `hooks/use-project-actions.ts` → the `/api/projects` routes, and the page is re-fetched with `router.refresh()` (it is dynamic: `currentUser()` + uncached Prisma). Project ID and Liveblocks room ID are kept equal by sending the slug-derived room ID as the project `id` on create.
+- API route handlers own their auth: `proxy.ts` skips `auth.protect()` for `/api/(.*)` and each handler calls `getAuthenticatedUserId()` and returns a JSON `401` itself. Reason — `clerkMiddleware`'s `auth.protect()` resolves an unauthenticated non-page request with `notFound()` (a bare `404`), which conflicts with the API contract's `401`. Page routes are still protected at the proxy.
 - Do not register a custom Tailwind color theme key named `base` (e.g. `--color-base`). It collides with Tailwind's built-in `text-base` font-size utility (both compile to a class literally named `.text-base`), and the color definition wins — silently turning every `text-base` usage across shadcn components into a text-color rule instead of a font-size rule. Discovered when `CardTitle` rendered nearly invisible (dark-on-dark). The `bg-background` utility (already mapped to the same page-background value) covers the same need without the collision.
 
 ## Session Notes

@@ -11,24 +11,22 @@ if (!databaseUrl) {
 
 const connectionString: string = databaseUrl;
 
-function createPrismaClient() {
+function createPrismaClient(): PrismaClient {
   if (connectionString.startsWith("prisma+postgres://")) {
     return new PrismaClient({ accelerateUrl: connectionString }).$extends(
       withAccelerate(),
-    );
+    ) as unknown as PrismaClient;
   }
 
   const adapter = new PrismaPg({ connectionString });
   return new PrismaClient({ adapter });
 }
 
-type CachedPrismaClient = ReturnType<typeof createPrismaClient>;
-
 const globalForPrisma = globalThis as unknown as {
-  prisma?: CachedPrismaClient;
+  prisma?: PrismaClient;
 };
 
-export const prisma: CachedPrismaClient =
+export const prisma: PrismaClient =
   globalForPrisma.prisma ?? createPrismaClient();
 
 if (process.env.NODE_ENV !== "production") {
