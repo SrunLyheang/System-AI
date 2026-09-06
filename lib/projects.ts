@@ -48,6 +48,11 @@ export function renameProject(id: string, name: string) {
   return prisma.project.update({ where: { id }, data: { name } });
 }
 
+/** Persist the Vercel Blob URL that holds this project's canvas JSON. */
+export function setProjectCanvasPath(id: string, canvasJsonPath: string) {
+  return prisma.project.update({ where: { id }, data: { canvasJsonPath } });
+}
+
 /** Delete an existing project. */
 export function deleteProject(id: string) {
   return prisma.project.delete({ where: { id } });

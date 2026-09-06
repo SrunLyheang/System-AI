@@ -7,7 +7,7 @@ declare global {
       // Live cursor position on the canvas, or null when off-canvas.
       cursor: { x: number; y: number } | null;
       // True while this user is waiting on an AI response.
-      isThinking: boolean;
+      thinking: boolean;
     };
 
     // The Storage tree for the room, for useMutation, useStorage, etc.
