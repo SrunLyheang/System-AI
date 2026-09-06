@@ -55,7 +55,8 @@ Add a floating control bar for zoom and undo/redo, then wire the same actions to
 - Control bar is added to the canvas.
 - Zoom actions use the React Flow instance.
 - Undo and redo use Liveblocks history.
-- Select all marks every node selected via the synced node state.
+- Select all marks every node selected through local-only React Flow selection
+  state; the selected field is not synchronized to collaborators.
 - Keyboard shortcuts are handled in `hooks/useKeyboardShortcuts`.
 - Shortcut handling skips editable fields.
 - `hooks/use-keyboard-shortcuts.check.ts` passes.

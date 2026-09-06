@@ -1,36 +1,36 @@
-"use client"
+"use client";
 
-import { useState } from "react"
+import { useState } from "react";
 
-import { UserButton } from "@clerk/nextjs"
+import { UserButton } from "@clerk/nextjs";
 import {
   LayoutTemplate,
   PanelLeftClose,
   PanelLeftOpen,
   Share2,
   Sparkles,
-} from "lucide-react"
+} from "lucide-react";
 
-import { CanvasRoom } from "@/components/editor/canvas"
-import { CreateProjectDialog } from "@/components/editor/create-project-dialog"
-import { DeleteProjectDialog } from "@/components/editor/delete-project-dialog"
-import { ProjectSidebar } from "@/components/editor/project-sidebar"
-import { RenameProjectDialog } from "@/components/editor/rename-project-dialog"
-import { ShareDialog } from "@/components/editor/share-dialog"
-import { Button } from "@/components/ui/button"
+import { CanvasRoom } from "@/components/editor/canvas";
+import { CreateProjectDialog } from "@/components/editor/create-project-dialog";
+import { DeleteProjectDialog } from "@/components/editor/delete-project-dialog";
+import { ProjectSidebar } from "@/components/editor/project-sidebar";
+import { RenameProjectDialog } from "@/components/editor/rename-project-dialog";
+import { ShareDialog } from "@/components/editor/share-dialog";
+import { Button } from "@/components/ui/button";
 import {
   useProjectActions,
   type EditorProject,
-} from "@/hooks/use-project-actions"
+} from "@/hooks/use-project-actions";
 
 interface WorkspaceShellProps {
-  project: EditorProject
-  ownedProjects: EditorProject[]
-  sharedProjects: EditorProject[]
+  project: EditorProject;
+  ownedProjects: EditorProject[];
+  sharedProjects: EditorProject[];
   /** Pending (unaccepted) invites for the current user. */
-  pendingInvites?: EditorProject[]
+  pendingInvites?: EditorProject[];
   /** True when the current user owns this project (may invite/remove collaborators). */
-  canManageShare: boolean
+  canManageShare: boolean;
 }
 
 function WorkspaceShell({
@@ -40,14 +40,15 @@ function WorkspaceShell({
   pendingInvites = [],
   canManageShare,
 }: WorkspaceShellProps) {
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
-  const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false)
-  const [isShareOpen, setIsShareOpen] = useState(false)
-  const [isTemplatesOpen, setIsTemplatesOpen] = useState(false)
-  const actions = useProjectActions()
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false);
+  const [isShareOpen, setIsShareOpen] = useState(false);
+  const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
+  const [isCanvasReady, setIsCanvasReady] = useState(false);
+  const actions = useProjectActions();
 
   function handleOpenChange(open: boolean) {
-    if (!open) actions.close()
+    if (!open) actions.close();
   }
 
   return (
@@ -75,6 +76,7 @@ function WorkspaceShell({
             variant="outline"
             size="sm"
             onClick={() => setIsTemplatesOpen(true)}
+            disabled={!isCanvasReady}
           >
             <LayoutTemplate className="h-4 w-4" />
             Templates
@@ -117,6 +119,7 @@ function WorkspaceShell({
             roomId={project.id}
             templatesOpen={isTemplatesOpen}
             onTemplatesOpenChange={setIsTemplatesOpen}
+            onReady={() => setIsCanvasReady(true)}
           />
         </main>
 
@@ -165,7 +168,7 @@ function WorkspaceShell({
         canManage={canManageShare}
       />
     </div>
-  )
+  );
 }
 
-export { WorkspaceShell }
+export { WorkspaceShell };
