@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { UserButton } from "@clerk/nextjs";
 import {
@@ -44,8 +44,15 @@ function WorkspaceShell({
   const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false);
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
-  const [isCanvasReady, setIsCanvasReady] = useState(false);
+  const [readyRoomId, setReadyRoomId] = useState<string | null>(null);
+  const currentProjectId = useRef(project.id);
   const actions = useProjectActions();
+
+  if (currentProjectId.current !== project.id) {
+    currentProjectId.current = project.id;
+    setReadyRoomId(null);
+    setIsTemplatesOpen(false);
+  }
 
   function handleOpenChange(open: boolean) {
     if (!open) actions.close();
@@ -75,8 +82,10 @@ function WorkspaceShell({
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setIsTemplatesOpen(true)}
-            disabled={!isCanvasReady}
+            onClick={() => {
+              if (readyRoomId === project.id) setIsTemplatesOpen(true);
+            }}
+            disabled={readyRoomId !== project.id}
           >
             <LayoutTemplate className="h-4 w-4" />
             Templates
@@ -119,7 +128,11 @@ function WorkspaceShell({
             roomId={project.id}
             templatesOpen={isTemplatesOpen}
             onTemplatesOpenChange={setIsTemplatesOpen}
-            onReady={() => setIsCanvasReady(true)}
+            onReady={() => {
+              if (currentProjectId.current === project.id) {
+                setReadyRoomId(project.id);
+              }
+            }}
           />
         </main>
 
