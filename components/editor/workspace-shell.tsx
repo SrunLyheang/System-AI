@@ -17,8 +17,6 @@ import { DeleteProjectDialog } from "@/components/editor/delete-project-dialog"
 import { ProjectSidebar } from "@/components/editor/project-sidebar"
 import { RenameProjectDialog } from "@/components/editor/rename-project-dialog"
 import { ShareDialog } from "@/components/editor/share-dialog"
-import { dispatchTemplateImport } from "@/components/editor/starter-templates"
-import { StarterTemplatesModal } from "@/components/editor/starter-templates-modal"
 import { Button } from "@/components/ui/button"
 import {
   useProjectActions,
@@ -115,7 +113,11 @@ function WorkspaceShell({
 
       <div className="flex flex-1 overflow-hidden">
         <main className="relative flex-1 bg-background">
-          <CanvasRoom roomId={project.id} />
+          <CanvasRoom
+            roomId={project.id}
+            templatesOpen={isTemplatesOpen}
+            onTemplatesOpenChange={setIsTemplatesOpen}
+          />
         </main>
 
         {isAiSidebarOpen ? (
@@ -161,11 +163,6 @@ function WorkspaceShell({
         onOpenChange={setIsShareOpen}
         projectId={project.id}
         canManage={canManageShare}
-      />
-      <StarterTemplatesModal
-        open={isTemplatesOpen}
-        onOpenChange={setIsTemplatesOpen}
-        onImport={dispatchTemplateImport}
       />
     </div>
   )

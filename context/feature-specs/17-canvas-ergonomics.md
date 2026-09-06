@@ -4,11 +4,12 @@ Add a floating control bar for zoom and undo/redo, then wire the same actions to
 
 1. Add a pill-shaped control bar at the bottom-left of the canvas.
 
-   It should sit above the shape panel and include two groups:
+   It should sit above the shape panel and include three groups:
    - zoom controls: zoom out, fit view, zoom in
+   - selection controls: select all nodes (disabled when the canvas is empty)
    - history controls: undo, redo
 
-   Separate the two groups with a thin divider.
+   Separate the groups with thin dividers.
 
 2. Wire the zoom controls to the React Flow instance.
    - zoom in
@@ -36,14 +37,17 @@ Add a floating control bar for zoom and undo/redo, then wire the same actions to
    - `Cmd/Ctrl + Z` to undo
    - `Cmd/Ctrl + Shift + Z` to redo
    - `Cmd/Ctrl + Y` to redo
+   - `Cmd/Ctrl + A` to select all nodes
 
 6. Remove the minimap at the bottom right
+
+7. Keep the key → action mapping in a pure, DOM-free helper (`matchShortcut`)
+   so it can be unit-checked without a browser.
 
 ## Scope Limits
 
 - don’t change the shape panel
 - don’t change node or edge rendering
-- don’t add extra canvas controls
 - don’t change the existing collaborative state setup
 
 ## Check When Done
@@ -51,6 +55,8 @@ Add a floating control bar for zoom and undo/redo, then wire the same actions to
 - Control bar is added to the canvas.
 - Zoom actions use the React Flow instance.
 - Undo and redo use Liveblocks history.
+- Select all marks every node selected via the synced node state.
 - Keyboard shortcuts are handled in `hooks/useKeyboardShortcuts`.
 - Shortcut handling skips editable fields.
+- `hooks/use-keyboard-shortcuts.check.ts` passes.
 - `npm run build` passes.

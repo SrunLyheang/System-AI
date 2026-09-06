@@ -2,9 +2,7 @@
 
 import {
   Component,
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useRef,
   useState,
@@ -19,6 +17,7 @@ import {
   RoomProvider,
   useCanRedo,
   useCanUndo,
+  useHistory,
   useRedo,
   useUndo,
 } from "@liveblocks/react/suspense"
@@ -52,7 +51,9 @@ import {
   Diamond,
   Hexagon,
   Maximize2,
+  Minus,
   Pill,
+  Plus,
   RectangleHorizontal,
   Redo2,
   Trash2,
@@ -63,10 +64,8 @@ import {
 } from "lucide-react"
 
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
-import {
-  IMPORT_TEMPLATE_EVENT,
-  type CanvasTemplate,
-} from "@/components/editor/starter-templates"
+import { StarterTemplatesModal } from "@/components/editor/starter-templates-modal"
+import type { CanvasTemplate } from "@/components/editor/starter-templates"
 
 import {
   CANVAS_EDGE_TYPE,
@@ -77,7 +76,6 @@ import {
   SHAPE_DEFAULT_SIZE,
   SHAPE_DRAG_TYPE,
   type CanvasEdge,
-  type CanvasEdgeData,
   type CanvasNode,
   type CanvasNodeShape,
   type NodeColor,
@@ -90,10 +88,17 @@ import "@liveblocks/react-flow/styles.css"
 interface CanvasRoomProps {
   /** Liveblocks room ID — equal to the project ID. */
   roomId: string
+  /** Starter-templates modal open state, owned by the navbar trigger. */
+  templatesOpen: boolean
+  onTemplatesOpenChange: (open: boolean) => void
 }
 
 /** Sets up the Liveblocks room for a project and renders the collaborative canvas. */
-function CanvasRoom({ roomId }: CanvasRoomProps) {
+function CanvasRoom({
+  roomId,
+  templatesOpen,
+  onTemplatesOpenChange,
+}: CanvasRoomProps) {
   return (
     <LiveblocksProvider authEndpoint="/api/liveblocks-auth">
       <RoomProvider
@@ -105,7 +110,10 @@ function CanvasRoom({ roomId }: CanvasRoomProps) {
             fallback={<CanvasMessage>Loading canvas…</CanvasMessage>}
           >
             <ReactFlowProvider>
-              <Canvas />
+              <Canvas
+                templatesOpen={templatesOpen}
+                onTemplatesOpenChange={onTemplatesOpenChange}
+              />
             </ReactFlowProvider>
           </ClientSideSuspense>
         </CanvasErrorBoundary>
@@ -157,14 +165,35 @@ function SvgShape({
 
 const LABEL_PLACEHOLDER = "Add label"
 const MIN_NODE_SIZE = 48
+const MAX_NODE_SIZE = 800
+/** Multiplier applied to a node's width/height per toolbar +/- click. */
+const RESIZE_STEP = 1.2
 
 /** Renders a dropped node as its shape variant with a centered, editable label.
  *  Borders are dim at rest and full-strength when the node is selected.
  *  Selected nodes also show subtle resize handles (React Flow `NodeResizer`). */
 function CanvasNodeView({ id, data, selected = false }: NodeProps<CanvasNode>) {
-  const { shape, color, textColor, label } = data
-  const { updateNodeData, deleteElements } = useReactFlow()
+  const { shape, label } = data
+  // Nodes created before the color feature have no `textColor` (and an old
+  // default `color`); fall back so their border/stroke/label still render.
+  const color = data.color ?? DEFAULT_NODE_COLOR
+  const textColor = data.textColor ?? DEFAULT_NODE_TEXT_COLOR
+  const { updateNode, updateNodeData, deleteElements, getNode } = useReactFlow()
   const [editing, setEditing] = useState(false)
+
+  // Step the node's box up/down by RESIZE_STEP, clamped, keeping its ratio.
+  const resizeNode = useCallback(
+    (factor: number) => {
+      const node = getNode(id)
+      if (!node) return
+      const w = node.width ?? node.measured?.width ?? MIN_NODE_SIZE
+      const h = node.height ?? node.measured?.height ?? MIN_NODE_SIZE
+      const clamp = (v: number) =>
+        Math.max(MIN_NODE_SIZE, Math.min(MAX_NODE_SIZE, Math.round(v)))
+      updateNode(id, { width: clamp(w * factor), height: clamp(h * factor) })
+    },
+    [getNode, id, updateNode],
+  )
 
   const stopEditing = useCallback(() => setEditing(false), [])
   const onKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -194,12 +223,15 @@ function CanvasNodeView({ id, data, selected = false }: NodeProps<CanvasNode>) {
         isVisible={selected}
         minWidth={MIN_NODE_SIZE}
         minHeight={MIN_NODE_SIZE}
-        lineStyle={{ borderColor: `${color}55` }}
+        // No rectangular outline — it reads as a stray box around diamond /
+        // hexagon / circle nodes. The shape's own border/stroke brightens on
+        // select instead; only the corner drag handles remain.
+        lineStyle={{ border: "none" }}
         handleStyle={{
-          width: 7,
-          height: 7,
-          borderRadius: 2,
-          border: `1px solid ${color}`,
+          width: 14,
+          height: 14,
+          borderRadius: 3,
+          border: `1.5px solid ${color}`,
           background: "var(--bg-surface)",
         }}
       />
@@ -215,7 +247,26 @@ function CanvasNodeView({ id, data, selected = false }: NodeProps<CanvasNode>) {
               }
             />
           ))}
-          <span className="mx-0.5 h-5 w-px bg-surface-border" />
+          <span className="mx-0.5 h-6 w-px bg-surface-border" />
+          <button
+            type="button"
+            onClick={() => resizeNode(1 / RESIZE_STEP)}
+            aria-label="Decrease node size"
+            title="Decrease size"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-elevated text-copy-secondary transition-colors hover:bg-surface-border hover:text-copy-primary"
+          >
+            <Minus className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => resizeNode(RESIZE_STEP)}
+            aria-label="Increase node size"
+            title="Increase size"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-elevated text-copy-secondary transition-colors hover:bg-surface-border hover:text-copy-primary"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
+          <span className="mx-0.5 h-6 w-px bg-surface-border" />
           <button
             type="button"
             onClick={() => deleteElements({ nodes: [{ id }] })}
@@ -292,13 +343,11 @@ function NodeHandles() {
           id={id}
           type="source"
           position={position}
-          className="opacity-0! transition-opacity! group-hover:opacity-100!"
-          style={{
-            width: 9,
-            height: 9,
-            background: "#f5f5f7",
-            border: "1.5px solid var(--bg-base)",
-          }}
+          // 28px transparent hit area; the visible 11px dot is drawn with
+          // ::before so the click/hover target grows without the dot changing.
+          // Faintly shown at rest so the connect points are discoverable, full
+          // strength on node hover.
+          className="h-7! w-7! border-0! bg-transparent! opacity-40! transition-opacity! group-hover:opacity-100! before:absolute before:left-1/2 before:top-1/2 before:h-[11px] before:w-[11px] before:-translate-x-1/2 before:-translate-y-1/2 before:rounded-full before:border-[1.5px] before:border-(--bg-base) before:bg-[#f5f5f7] before:content-['']"
         />
       ))}
     </>
@@ -358,12 +407,6 @@ function createShapeGhost(shape: CanvasNodeShape): HTMLElement {
 
 const nodeTypes: NodeTypes = { [CANVAS_NODE_TYPE]: CanvasNodeView }
 
-/** Lets a custom edge push a label change through the Liveblocks-synced
- *  `onEdgesChange` (React Flow has no `updateEdgeData` in this version). */
-const EdgeDataContext = createContext<
-  (id: string, data: Partial<CanvasEdgeData>) => void
->(() => {})
-
 const EDGE_STROKE_REST = "var(--text-muted)"
 const EDGE_STROKE_ACTIVE = "var(--text-primary)"
 
@@ -395,8 +438,7 @@ function CanvasEdgeView({
   selected = false,
   markerEnd,
 }: EdgeProps<CanvasEdge>) {
-  const updateEdgeData = useContext(EdgeDataContext)
-  const { deleteElements } = useReactFlow()
+  const { updateEdgeData, deleteElements } = useReactFlow()
   const [hovered, setHovered] = useState(false)
   const [editing, setEditing] = useState(false)
 
@@ -466,11 +508,11 @@ function CanvasEdgeView({
                 }}
               />
             ) : label ? (
-              <span className="rounded-full border border-surface-border bg-surface px-2 py-0.5 text-[10px] leading-none text-copy-secondary shadow-sm">
+              <span className="rounded-full border border-surface-border bg-surface px-2.5 py-1 text-[11px] font-medium leading-none text-copy-primary shadow-sm">
                 {label}
               </span>
             ) : (
-              <span className="rounded-full px-2 py-0.5 text-[10px] leading-none text-copy-faint">
+              <span className="rounded-full border border-dashed border-surface-border bg-surface/95 px-2.5 py-1 text-[11px] leading-none text-copy-secondary shadow-sm">
                 Double-click to label
               </span>
             )}
@@ -483,9 +525,9 @@ function CanvasEdgeView({
                 }}
                 aria-label="Delete connection"
                 title="Delete connection"
-                className="flex h-5 w-5 items-center justify-center rounded-full border border-surface-border bg-surface text-copy-muted shadow-sm transition-colors hover:bg-elevated hover:text-copy-primary"
+                className="flex h-6 w-6 items-center justify-center rounded-full border border-surface-border bg-surface text-copy-muted shadow-sm transition-colors hover:bg-elevated hover:text-copy-primary"
               >
-                <Trash2 className="h-3 w-3" />
+                <Trash2 className="h-3.5 w-3.5" />
               </button>
             )}
           </div>
@@ -677,7 +719,13 @@ function CanvasControls({
 }
 
 /** React Flow surface wired to Liveblocks-synced nodes and edges. */
-function Canvas() {
+function Canvas({
+  templatesOpen,
+  onTemplatesOpenChange,
+}: {
+  templatesOpen: boolean
+  onTemplatesOpenChange: (open: boolean) => void
+}) {
   const { nodes, edges, onNodesChange, onEdgesChange, onConnect, onDelete } =
     useLiveblocksFlow<CanvasNode, CanvasEdge>({
       suspense: true,
@@ -690,45 +738,32 @@ function Canvas() {
   const redo = useRedo()
   const canUndo = useCanUndo()
   const canRedo = useCanRedo()
+  const history = useHistory()
 
   const wrapperRef = useRef<HTMLDivElement>(null)
   const dropCounter = useRef(0)
 
-  // Replace the whole canvas with a starter template (fired from the navbar).
-  useEffect(() => {
-    function onImport(event: Event) {
-      const { nodes: tplNodes, edges: tplEdges } = (
-        event as CustomEvent<CanvasTemplate>
-      ).detail
-      onNodesChange([
-        ...nodes.map((n) => ({ type: "remove" as const, id: n.id })),
-        ...tplNodes.map((item) => ({ type: "add" as const, item })),
-      ])
-      onEdgesChange([
-        ...edges.map((e) => ({ type: "remove" as const, id: e.id })),
-        ...tplEdges.map((item) => ({ type: "add" as const, item })),
-      ])
+  // Replace the whole canvas with a starter template. `onDelete` is the only
+  // path that actually removes synced nodes/edges (`remove` changes are a
+  // no-op in @liveblocks/react-flow); the adds run right after, so the
+  // template's nodes land regardless of overlap with the cleared ids.
+  // `pause`/`resume` collapse the clear + re-add into one undo step so a
+  // single ⌘Z restores the previous canvas (as the modal promises).
+  const importTemplate = useCallback(
+    (template: CanvasTemplate) => {
+      history.pause()
+      onDelete({ nodes, edges })
+      onNodesChange(
+        template.nodes.map((item) => ({ type: "add" as const, item })),
+      )
+      onEdgesChange(
+        template.edges.map((item) => ({ type: "add" as const, item })),
+      )
+      history.resume()
       // ponytail: fixed delay to let the synced state settle before fitting.
       window.setTimeout(() => reactFlow.fitView({ duration: 200 }), 80)
-    }
-    window.addEventListener(IMPORT_TEMPLATE_EVENT, onImport)
-    return () => window.removeEventListener(IMPORT_TEMPLATE_EVENT, onImport)
-  }, [nodes, edges, onNodesChange, onEdgesChange, reactFlow])
-
-  // Route an edge-label edit through the same synced change stream as everything else.
-  const updateEdgeData = useCallback(
-    (edgeId: string, patch: Partial<CanvasEdgeData>) => {
-      const edge = edges.find((e) => e.id === edgeId)
-      if (!edge) return
-      onEdgesChange([
-        {
-          type: "replace",
-          id: edgeId,
-          item: { ...edge, data: { ...edge.data, ...patch } },
-        },
-      ])
     },
-    [edges, onEdgesChange],
+    [history, nodes, edges, onDelete, onNodesChange, onEdgesChange, reactFlow],
   )
 
   const onDragOver = useCallback((event: DragEvent) => {
@@ -814,39 +849,168 @@ function Canvas() {
     [screenToFlowPosition, addShape],
   )
 
+  // Right-drag marquee: React Flow's built-in selection box is left-button only
+  // (it hardcodes `event.button !== 0`), so we draw our own rectangle on
+  // right-drag and mark the nodes inside it selected through the synced
+  // `onNodesChange` `replace` path (same one `selectAll` uses).
+  const [marquee, setMarquee] = useState<
+    { x: number; y: number; w: number; h: number } | null
+  >(null)
+
+  // React Flow's pane swallows mousedown before it can bubble to React's
+  // delegated handlers, so we listen in the capture phase on the wrapper node.
+  useEffect(() => {
+    const wrap = wrapperRef.current
+    if (!wrap) return
+
+    // Window listeners for the active drag; hoisted so the effect cleanup can
+    // also detach them if Canvas unmounts mid-drag.
+    let onMove: ((e: MouseEvent) => void) | null = null
+    let onUp: ((e: MouseEvent) => void) | null = null
+    const detach = () => {
+      if (onMove) window.removeEventListener("mousemove", onMove, true)
+      if (onUp) window.removeEventListener("mouseup", onUp, true)
+      onMove = onUp = null
+    }
+
+    // Only the empty pane starts a marquee — never a node, an edge label, or
+    // an input, so those keep their native right-click behavior.
+    const onPane = (target: EventTarget | null) =>
+      target instanceof HTMLElement && !!target.closest(".react-flow__pane")
+
+    const onDown = (event: MouseEvent) => {
+      if (event.button !== 2 || !onPane(event.target)) return
+      const bounds = wrap.getBoundingClientRect()
+      event.preventDefault()
+      event.stopPropagation()
+
+      const start = { x: event.clientX, y: event.clientY }
+      setMarquee({ x: start.x - bounds.left, y: start.y - bounds.top, w: 0, h: 0 })
+
+      onMove = (e: MouseEvent) => {
+        setMarquee({
+          x: Math.min(start.x, e.clientX) - bounds.left,
+          y: Math.min(start.y, e.clientY) - bounds.top,
+          w: Math.abs(e.clientX - start.x),
+          h: Math.abs(e.clientY - start.y),
+        })
+      }
+      onUp = (e: MouseEvent) => {
+        detach()
+        setMarquee(null)
+
+        const box = {
+          minX: Math.min(start.x, e.clientX),
+          minY: Math.min(start.y, e.clientY),
+          maxX: Math.max(start.x, e.clientX),
+          maxY: Math.max(start.y, e.clientY),
+        }
+        // A near-still right-click isn't a marquee — leave selection alone.
+        if (box.maxX - box.minX < 4 && box.maxY - box.minY < 4) return
+
+        const hit = new Set(
+          reactFlow
+            .getNodes()
+            .filter((n) => {
+              const w =
+                n.measured?.width ?? n.width ?? SHAPE_DEFAULT_SIZE[n.data.shape].width
+              const h =
+                n.measured?.height ??
+                n.height ??
+                SHAPE_DEFAULT_SIZE[n.data.shape].height
+              const tl = reactFlow.flowToScreenPosition(n.position)
+              const br = reactFlow.flowToScreenPosition({
+                x: n.position.x + w,
+                y: n.position.y + h,
+              })
+              return (
+                tl.x < box.maxX &&
+                br.x > box.minX &&
+                tl.y < box.maxY &&
+                br.y > box.minY
+              )
+            })
+            .map((n) => n.id),
+        )
+
+        onNodesChange(
+          reactFlow.getNodes().map((n) => ({
+            type: "replace" as const,
+            id: n.id,
+            item: { ...n, selected: hit.has(n.id) },
+          })),
+        )
+      }
+      window.addEventListener("mousemove", onMove, true)
+      window.addEventListener("mouseup", onUp, true)
+    }
+
+    // Suppress the browser menu only over the pane (where the marquee lives) —
+    // nodes, edge labels, and text inputs keep their native context menu.
+    const blockMenu = (e: MouseEvent) => {
+      if (onPane(e.target)) e.preventDefault()
+    }
+    wrap.addEventListener("mousedown", onDown, true)
+    wrap.addEventListener("contextmenu", blockMenu)
+    return () => {
+      wrap.removeEventListener("mousedown", onDown, true)
+      wrap.removeEventListener("contextmenu", blockMenu)
+      detach()
+    }
+  }, [reactFlow, onNodesChange])
+
   return (
     <div
       ref={wrapperRef}
-      className="h-full w-full"
+      className={`relative h-full w-full ${marquee ? "select-none" : ""}`}
       onDragOver={onDragOver}
       onDrop={onDrop}
     >
-      <EdgeDataContext.Provider value={updateEdgeData}>
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          defaultEdgeOptions={defaultEdgeOptions}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          onDelete={onDelete}
-          connectionMode={ConnectionMode.Loose}
-          fitView
-        >
-          <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
-          <CanvasControls
-            onUndo={undo}
-            onRedo={redo}
-            onSelectAll={selectAll}
-            canUndo={canUndo}
-            canRedo={canRedo}
-            canSelectAll={nodes.length > 0}
-          />
-          <ShapePanel onCreate={createShapeAtCenter} />
-        </ReactFlow>
-      </EdgeDataContext.Provider>
+      {marquee && (
+        <div
+          className="pointer-events-none absolute z-50 rounded-[2px] border border-copy-primary bg-copy-primary/10"
+          style={{
+            left: marquee.x,
+            top: marquee.y,
+            width: marquee.w,
+            height: marquee.h,
+          }}
+        />
+      )}
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
+        defaultEdgeOptions={defaultEdgeOptions}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        onConnect={onConnect}
+        onDelete={onDelete}
+        connectionMode={ConnectionMode.Loose}
+        // Connections require an actual drag between two dots. Without this,
+        // React Flow's click-to-connect (on by default) turns a click that
+        // lands on a node's enlarged handle zone into a pending connection,
+        // and the next node click completes it — a stray arrow appears.
+        connectOnClick={false}
+        fitView
+      >
+        <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
+        <CanvasControls
+          onUndo={undo}
+          onRedo={redo}
+          onSelectAll={selectAll}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          canSelectAll={nodes.length > 0}
+        />
+        <ShapePanel onCreate={createShapeAtCenter} />
+      </ReactFlow>
+      <StarterTemplatesModal
+        open={templatesOpen}
+        onOpenChange={onTemplatesOpenChange}
+        onImport={importTemplate}
+      />
     </div>
   )
 }
