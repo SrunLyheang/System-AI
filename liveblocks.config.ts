@@ -4,45 +4,38 @@ declare global {
   interface Liveblocks {
     // Each user's Presence, for useMyPresence, useOthers, etc.
     Presence: {
-      // Example, real-time cursor coordinates
-      // cursor: { x: number; y: number };
+      // Live cursor position on the canvas, or null when off-canvas.
+      cursor: { x: number; y: number } | null;
+      // True while this user is waiting on an AI response.
+      isThinking: boolean;
     };
 
     // The Storage tree for the room, for useMutation, useStorage, etc.
-    Storage: {
-      // Example, a conflict-free list
-      // animals: LiveList<string>;
-    };
+    // Populated when the React Flow canvas lands (next feature unit).
+    Storage: Record<string, never>;
 
     // Custom user info set when authenticating with a secret key
     UserMeta: {
+      // Clerk user ID.
       id: string;
       info: {
-        // Example properties, for useSelf, useUser, useOthers, etc.
-        // name: string;
-        // avatar: string;
+        // Display name shown on cursors and avatars.
+        name: string;
+        // Avatar image URL.
+        avatar: string;
+        // Deterministic cursor color derived from the user ID.
+        color: string;
       };
     };
 
     // Custom events, for useBroadcastEvent, useEventListener
-    RoomEvent: {};
-      // Example has two events, using a union
-      // | { type: "PLAY" } 
-      // | { type: "REACTION"; emoji: "🔥" };
+    RoomEvent: Record<string, never>;
 
     // Custom metadata set on threads, for useThreads, useCreateThread, etc.
-    ThreadMetadata: {
-      // Example, attaching coordinates to a thread
-      // x: number;
-      // y: number;
-    };
+    ThreadMetadata: Record<string, never>;
 
     // Custom room info set with resolveRoomsInfo, for useRoomInfo
-    RoomInfo: {
-      // Example, rooms with a title and url
-      // title: string;
-      // url: string;
-    };
+    RoomInfo: Record<string, never>;
   }
 }
 

@@ -4,17 +4,21 @@ import { useState } from "react"
 
 import { UserButton } from "@clerk/nextjs"
 import {
+  LayoutTemplate,
   PanelLeftClose,
   PanelLeftOpen,
   Share2,
   Sparkles,
 } from "lucide-react"
 
+import { CanvasRoom } from "@/components/editor/canvas"
 import { CreateProjectDialog } from "@/components/editor/create-project-dialog"
 import { DeleteProjectDialog } from "@/components/editor/delete-project-dialog"
 import { ProjectSidebar } from "@/components/editor/project-sidebar"
 import { RenameProjectDialog } from "@/components/editor/rename-project-dialog"
 import { ShareDialog } from "@/components/editor/share-dialog"
+import { dispatchTemplateImport } from "@/components/editor/starter-templates"
+import { StarterTemplatesModal } from "@/components/editor/starter-templates-modal"
 import { Button } from "@/components/ui/button"
 import {
   useProjectActions,
@@ -41,6 +45,7 @@ function WorkspaceShell({
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false)
   const [isShareOpen, setIsShareOpen] = useState(false)
+  const [isTemplatesOpen, setIsTemplatesOpen] = useState(false)
   const actions = useProjectActions()
 
   function handleOpenChange(open: boolean) {
@@ -68,6 +73,14 @@ function WorkspaceShell({
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsTemplatesOpen(true)}
+          >
+            <LayoutTemplate className="h-4 w-4" />
+            Templates
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -101,10 +114,8 @@ function WorkspaceShell({
       />
 
       <div className="flex flex-1 overflow-hidden">
-        <main className="flex flex-1 items-center justify-center bg-background px-6 text-center">
-          <p className="text-sm text-copy-muted">
-            The canvas for {project.name} will live here.
-          </p>
+        <main className="relative flex-1 bg-background">
+          <CanvasRoom roomId={project.id} />
         </main>
 
         {isAiSidebarOpen ? (
@@ -150,6 +161,11 @@ function WorkspaceShell({
         onOpenChange={setIsShareOpen}
         projectId={project.id}
         canManage={canManageShare}
+      />
+      <StarterTemplatesModal
+        open={isTemplatesOpen}
+        onOpenChange={setIsTemplatesOpen}
+        onImport={dispatchTemplateImport}
       />
     </div>
   )
