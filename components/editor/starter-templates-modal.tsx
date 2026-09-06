@@ -51,7 +51,7 @@ function StarterTemplatesModal({
               key={template.id}
               className="flex flex-col gap-5 rounded-xl border border-surface-border p-5"
             >
-              <div className="overflow-hidden rounded-lg border border-surface-border-subtle bg-surface">
+              <div className="overflow-hidden rounded-lg border border-surface-border-subtle bg-base">
                 <TemplatePreview template={template} />
               </div>
               <div className="flex flex-1 flex-col gap-2">
@@ -159,46 +159,64 @@ function PreviewShape({
   accent: string
 }) {
   const { x, y, w, h } = box
-  // The real node fills are near-black by design and read as blobs at this
-  // size with no labels — tint each shape with its accent color instead.
-  const common = { fill: accent, fillOpacity: 0.22, stroke: accent, strokeWidth: 2 }
 
-  if (shape === "circle") {
+  // Draw each shape twice: an opaque panel-colored backing so the connector
+  // line never bleeds through, then the accent tint on top. The real node
+  // fills are near-black and read as blobs at this size with no labels.
+  const shapeEl = (props: Record<string, unknown>) => {
+    if (shape === "circle") {
+      return (
+        <ellipse cx={x + w / 2} cy={y + h / 2} rx={w / 2} ry={h / 2} {...props} />
+      )
+    }
+    if (shape === "diamond") {
+      const pts = [
+        [x + w / 2, y],
+        [x + w, y + h / 2],
+        [x + w / 2, y + h],
+        [x, y + h / 2],
+      ]
+      return (
+        <polygon points={pts.map((p) => p.join(",")).join(" ")} {...props} />
+      )
+    }
+    if (shape === "hexagon") {
+      const q = w * 0.25
+      const pts = [
+        [x + q, y],
+        [x + w - q, y],
+        [x + w, y + h / 2],
+        [x + w - q, y + h],
+        [x + q, y + h],
+        [x, y + h / 2],
+      ]
+      return (
+        <polygon points={pts.map((p) => p.join(",")).join(" ")} {...props} />
+      )
+    }
+    // rectangle, pill, cylinder — rounded rect (pill fully rounded)
     return (
-      <ellipse cx={x + w / 2} cy={y + h / 2} rx={w / 2} ry={h / 2} {...common} />
+      <rect
+        x={x}
+        y={y}
+        width={w}
+        height={h}
+        rx={shape === "pill" ? h / 2 : 8}
+        {...props}
+      />
     )
   }
-  if (shape === "diamond") {
-    const pts = [
-      [x + w / 2, y],
-      [x + w, y + h / 2],
-      [x + w / 2, y + h],
-      [x, y + h / 2],
-    ]
-    return <polygon points={pts.map((p) => p.join(",")).join(" ")} {...common} />
-  }
-  if (shape === "hexagon") {
-    const q = w * 0.25
-    const pts = [
-      [x + q, y],
-      [x + w - q, y],
-      [x + w, y + h / 2],
-      [x + w - q, y + h],
-      [x + q, y + h],
-      [x, y + h / 2],
-    ]
-    return <polygon points={pts.map((p) => p.join(",")).join(" ")} {...common} />
-  }
-  // rectangle, pill, cylinder — rounded rect (pill fully rounded)
+
   return (
-    <rect
-      x={x}
-      y={y}
-      width={w}
-      height={h}
-      rx={shape === "pill" ? h / 2 : 8}
-      {...common}
-    />
+    <>
+      {shapeEl({ fill: "var(--bg-base)" })}
+      {shapeEl({
+        fill: accent,
+        fillOpacity: 0.22,
+        stroke: accent,
+        strokeWidth: 2,
+      })}
+    </>
   )
 }
 

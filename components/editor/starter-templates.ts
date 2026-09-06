@@ -139,13 +139,3 @@ export const CANVAS_TEMPLATES: CanvasTemplate[] = [
   cicd,
   eventDriven,
 ]
-
-/** Window event the canvas listens for to swap in a template. */
-export const IMPORT_TEMPLATE_EVENT = "canvas:import-template"
-
-/** Ask the mounted canvas to replace its contents with `template`. */
-export function dispatchTemplateImport(template: CanvasTemplate) {
-  window.dispatchEvent(
-    new CustomEvent<CanvasTemplate>(IMPORT_TEMPLATE_EVENT, { detail: template }),
-  )
-}

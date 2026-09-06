@@ -15,6 +15,9 @@ for (const t of CANVAS_TEMPLATES) {
   const ids = new Set(t.nodes.map((n) => n.id))
   assert.equal(ids.size, t.nodes.length, `${t.id}: node ids unique`)
 
+  const edgeIds = new Set(t.edges.map((e) => e.id))
+  assert.equal(edgeIds.size, t.edges.length, `${t.id}: edge ids unique`)
+
   for (const e of t.edges) {
     assert.ok(ids.has(e.source), `${t.id}: edge source ${e.source} exists`)
     assert.ok(ids.has(e.target), `${t.id}: edge target ${e.target} exists`)

@@ -1,38 +1,36 @@
-"use client"
+"use client";
 
-import { useState } from "react"
+import { useRef, useState } from "react";
 
-import { UserButton } from "@clerk/nextjs"
+import { UserButton } from "@clerk/nextjs";
 import {
   LayoutTemplate,
   PanelLeftClose,
   PanelLeftOpen,
   Share2,
   Sparkles,
-} from "lucide-react"
+} from "lucide-react";
 
-import { CanvasRoom } from "@/components/editor/canvas"
-import { CreateProjectDialog } from "@/components/editor/create-project-dialog"
-import { DeleteProjectDialog } from "@/components/editor/delete-project-dialog"
-import { ProjectSidebar } from "@/components/editor/project-sidebar"
-import { RenameProjectDialog } from "@/components/editor/rename-project-dialog"
-import { ShareDialog } from "@/components/editor/share-dialog"
-import { dispatchTemplateImport } from "@/components/editor/starter-templates"
-import { StarterTemplatesModal } from "@/components/editor/starter-templates-modal"
-import { Button } from "@/components/ui/button"
+import { CanvasRoom } from "@/components/editor/canvas";
+import { CreateProjectDialog } from "@/components/editor/create-project-dialog";
+import { DeleteProjectDialog } from "@/components/editor/delete-project-dialog";
+import { ProjectSidebar } from "@/components/editor/project-sidebar";
+import { RenameProjectDialog } from "@/components/editor/rename-project-dialog";
+import { ShareDialog } from "@/components/editor/share-dialog";
+import { Button } from "@/components/ui/button";
 import {
   useProjectActions,
   type EditorProject,
-} from "@/hooks/use-project-actions"
+} from "@/hooks/use-project-actions";
 
 interface WorkspaceShellProps {
-  project: EditorProject
-  ownedProjects: EditorProject[]
-  sharedProjects: EditorProject[]
+  project: EditorProject;
+  ownedProjects: EditorProject[];
+  sharedProjects: EditorProject[];
   /** Pending (unaccepted) invites for the current user. */
-  pendingInvites?: EditorProject[]
+  pendingInvites?: EditorProject[];
   /** True when the current user owns this project (may invite/remove collaborators). */
-  canManageShare: boolean
+  canManageShare: boolean;
 }
 
 function WorkspaceShell({
@@ -42,14 +40,22 @@ function WorkspaceShell({
   pendingInvites = [],
   canManageShare,
 }: WorkspaceShellProps) {
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
-  const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false)
-  const [isShareOpen, setIsShareOpen] = useState(false)
-  const [isTemplatesOpen, setIsTemplatesOpen] = useState(false)
-  const actions = useProjectActions()
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false);
+  const [isShareOpen, setIsShareOpen] = useState(false);
+  const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
+  const [readyRoomId, setReadyRoomId] = useState<string | null>(null);
+  const currentProjectId = useRef(project.id);
+  const actions = useProjectActions();
+
+  if (currentProjectId.current !== project.id) {
+    currentProjectId.current = project.id;
+    setReadyRoomId(null);
+    setIsTemplatesOpen(false);
+  }
 
   function handleOpenChange(open: boolean) {
-    if (!open) actions.close()
+    if (!open) actions.close();
   }
 
   return (
@@ -76,7 +82,10 @@ function WorkspaceShell({
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setIsTemplatesOpen(true)}
+            onClick={() => {
+              if (readyRoomId === project.id) setIsTemplatesOpen(true);
+            }}
+            disabled={readyRoomId !== project.id}
           >
             <LayoutTemplate className="h-4 w-4" />
             Templates
@@ -115,7 +124,16 @@ function WorkspaceShell({
 
       <div className="flex flex-1 overflow-hidden">
         <main className="relative flex-1 bg-background">
-          <CanvasRoom roomId={project.id} />
+          <CanvasRoom
+            roomId={project.id}
+            templatesOpen={isTemplatesOpen}
+            onTemplatesOpenChange={setIsTemplatesOpen}
+            onReady={() => {
+              if (currentProjectId.current === project.id) {
+                setReadyRoomId(project.id);
+              }
+            }}
+          />
         </main>
 
         {isAiSidebarOpen ? (
@@ -162,13 +180,8 @@ function WorkspaceShell({
         projectId={project.id}
         canManage={canManageShare}
       />
-      <StarterTemplatesModal
-        open={isTemplatesOpen}
-        onOpenChange={setIsTemplatesOpen}
-        onImport={dispatchTemplateImport}
-      />
     </div>
-  )
+  );
 }
 
-export { WorkspaceShell }
+export { WorkspaceShell };
