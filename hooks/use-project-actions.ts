@@ -13,7 +13,7 @@ export interface EditorProject {
 
 type ActiveDialog = "create" | "rename" | "delete" | null
 
-interface UseProjectActions {
+export interface UseProjectActions {
   /** Which project dialog is currently open, if any. */
   activeDialog: ActiveDialog
   /** The project a rename/delete action targets. `null` for create. */

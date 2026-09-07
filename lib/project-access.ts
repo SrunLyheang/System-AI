@@ -1,6 +1,7 @@
 import { currentUser } from "@clerk/nextjs/server";
 
 import { prisma } from "@/lib/prisma";
+import { findProjectById } from "@/lib/projects";
 
 /** The current Clerk user's ID plus their primary email address. */
 export interface ClerkIdentity {
@@ -48,4 +49,20 @@ export async function getAccessibleProject(
     );
 
   return isOwner || isCollaborator ? project : null;
+}
+
+/**
+ * Load a project that `userId` must own. Returns the project, or a ready-to-return
+ * `404` (no such project) / `403` (exists but not owned) response. Route handlers
+ * do `const project = await requireOwnedProject(id, userId); if (project instanceof Response) return project;`.
+ */
+export async function requireOwnedProject(projectId: string, userId: string) {
+  const project = await findProjectById(projectId);
+  if (!project) {
+    return Response.json({ error: "Not found" }, { status: 404 });
+  }
+  if (project.ownerId !== userId) {
+    return Response.json({ error: "Forbidden" }, { status: 403 });
+  }
+  return project;
 }

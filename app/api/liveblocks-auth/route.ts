@@ -1,6 +1,6 @@
 import { currentUser } from "@clerk/nextjs/server";
 
-import { InvalidJsonBodyError, readJsonBody } from "@/lib/http";
+import { readJsonObject } from "@/lib/http";
 import { colorForUserId, getLiveblocks } from "@/lib/liveblocks";
 import { getAccessibleProject } from "@/lib/project-access";
 
@@ -17,15 +17,8 @@ export async function POST(request: Request) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: Record<string, unknown>;
-  try {
-    body = await readJsonBody(request);
-  } catch (error) {
-    if (error instanceof InvalidJsonBodyError) {
-      return Response.json({ error: error.message }, { status: 400 });
-    }
-    throw error;
-  }
+  const body = await readJsonObject(request);
+  if (body instanceof Response) return body;
 
   const roomId = typeof body.room === "string" ? body.room : "";
   if (!roomId) {

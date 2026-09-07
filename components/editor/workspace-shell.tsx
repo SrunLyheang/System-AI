@@ -1,8 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { UserButton } from "@clerk/nextjs";
 import {
   LayoutTemplate,
   PanelLeftClose,
@@ -12,10 +11,9 @@ import {
 } from "lucide-react";
 
 import { CanvasRoom } from "@/components/editor/canvas";
-import { CreateProjectDialog } from "@/components/editor/create-project-dialog";
-import { DeleteProjectDialog } from "@/components/editor/delete-project-dialog";
+import type { CanvasSaveStatus } from "@/hooks/use-canvas-autosave";
+import { ProjectDialogs } from "@/components/editor/project-dialogs";
 import { ProjectSidebar } from "@/components/editor/project-sidebar";
-import { RenameProjectDialog } from "@/components/editor/rename-project-dialog";
 import { ShareDialog } from "@/components/editor/share-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,18 +42,25 @@ function WorkspaceShell({
   const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false);
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
-  const [readyRoomId, setReadyRoomId] = useState<string | null>(null);
-  const currentProjectId = useRef(project.id);
+  const [saveStatus, setSaveStatus] = useState<CanvasSaveStatus>("idle");
+  // The canvas (inside the Liveblocks room) owns the real save function; it
+  // registers it here so the navbar button can trigger a manual save.
+  const manualSaveRef = useRef<() => void>(() => {});
+  const registerSave = useCallback((save: () => void) => {
+    manualSaveRef.current = save;
+  }, []);
+  // Canvas readiness is per-project: store the id the canvas reported ready for
+  // and gate Templates on it matching the active project. A late onReady from a
+  // previous CanvasRoom carries the old id, so it can never mark the new one
+  // ready. `renderedProjectId` drives a synchronous reset when the room changes.
+  const [readyProjectId, setReadyProjectId] = useState<string | null>(null);
+  const [renderedProjectId, setRenderedProjectId] = useState(project.id);
   const actions = useProjectActions();
 
-  if (currentProjectId.current !== project.id) {
-    currentProjectId.current = project.id;
-    setReadyRoomId(null);
+  if (renderedProjectId !== project.id) {
+    setRenderedProjectId(project.id);
+    setReadyProjectId(null);
     setIsTemplatesOpen(false);
-  }
-
-  function handleOpenChange(open: boolean) {
-    if (!open) actions.close();
   }
 
   return (
@@ -79,13 +84,17 @@ function WorkspaceShell({
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <SaveButton
+            status={saveStatus}
+            onSave={() => manualSaveRef.current()}
+          />
           <Button
             variant="outline"
             size="sm"
             onClick={() => {
-              if (readyRoomId === project.id) setIsTemplatesOpen(true);
+              if (readyProjectId === project.id) setIsTemplatesOpen(true);
             }}
-            disabled={readyRoomId !== project.id}
+            disabled={readyProjectId !== project.id}
           >
             <LayoutTemplate className="h-4 w-4" />
             Templates
@@ -106,7 +115,6 @@ function WorkspaceShell({
           >
             <Sparkles className="h-4 w-4" />
           </Button>
-          <UserButton />
         </div>
       </nav>
 
@@ -128,11 +136,9 @@ function WorkspaceShell({
             roomId={project.id}
             templatesOpen={isTemplatesOpen}
             onTemplatesOpenChange={setIsTemplatesOpen}
-            onReady={() => {
-              if (currentProjectId.current === project.id) {
-                setReadyRoomId(project.id);
-              }
-            }}
+            onReady={() => setReadyProjectId(project.id)}
+            onSaveStatusChange={setSaveStatus}
+            onRegisterSave={registerSave}
           />
         </main>
 
@@ -149,31 +155,7 @@ function WorkspaceShell({
         ) : null}
       </div>
 
-      <CreateProjectDialog
-        open={actions.activeDialog === "create"}
-        name={actions.name}
-        roomIdPreview={actions.roomIdPreview}
-        isLoading={actions.isLoading}
-        onOpenChange={handleOpenChange}
-        onNameChange={actions.setName}
-        onSubmit={actions.submitCreate}
-      />
-      <RenameProjectDialog
-        open={actions.activeDialog === "rename"}
-        name={actions.name}
-        currentName={actions.targetProject?.name ?? ""}
-        isLoading={actions.isLoading}
-        onOpenChange={handleOpenChange}
-        onNameChange={actions.setName}
-        onSubmit={actions.submitRename}
-      />
-      <DeleteProjectDialog
-        open={actions.activeDialog === "delete"}
-        projectName={actions.targetProject?.name ?? ""}
-        isLoading={actions.isLoading}
-        onOpenChange={handleOpenChange}
-        onConfirm={actions.confirmDelete}
-      />
+      <ProjectDialogs actions={actions} />
       <ShareDialog
         open={isShareOpen}
         onOpenChange={setIsShareOpen}
@@ -181,6 +163,51 @@ function WorkspaceShell({
         canManage={canManageShare}
       />
     </div>
+  );
+}
+
+/** Workspace-only Save button. The canvas autosaves on a debounce; this also
+ *  lets the user save on demand. Reflects the shared save status: "Saving..."
+ *  while in flight, then a brief "Saved" / "Error" flash before returning to
+ *  "Save". Rendered only here, so it never appears on the editor-home navbar. */
+function SaveButton({
+  status,
+  onSave,
+}: {
+  status: CanvasSaveStatus;
+  onSave: () => void;
+}) {
+  // Show "Saved"/"Error" for a moment after a save settles, then fall back.
+  const [flash, setFlash] = useState<"saved" | "error" | null>(null);
+  const [prevStatus, setPrevStatus] = useState(status);
+  if (prevStatus !== status) {
+    setPrevStatus(status);
+    setFlash(status === "saved" || status === "error" ? status : null);
+  }
+  useEffect(() => {
+    if (flash === null) return;
+    const timer = setTimeout(() => setFlash(null), 2000);
+    return () => clearTimeout(timer);
+  }, [flash]);
+
+  const label =
+    status === "saving"
+      ? "Saving..."
+      : flash === "saved"
+        ? "Saved"
+        : flash === "error"
+          ? "Error"
+          : "Save";
+
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={onSave}
+      disabled={status === "saving"}
+    >
+      {label}
+    </Button>
   );
 }
 

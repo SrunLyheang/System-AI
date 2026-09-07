@@ -1,13 +1,12 @@
 "use client"
 
+import { UserButton } from "@clerk/nextjs"
+import { PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react"
 import { useState } from "react"
 
-import { CreateProjectDialog } from "@/components/editor/create-project-dialog"
-import { DeleteProjectDialog } from "@/components/editor/delete-project-dialog"
-import { EditorHome } from "@/components/editor/editor-home"
-import { EditorNavbar } from "@/components/editor/editor-navbar"
+import { ProjectDialogs } from "@/components/editor/project-dialogs"
 import { ProjectSidebar } from "@/components/editor/project-sidebar"
-import { RenameProjectDialog } from "@/components/editor/rename-project-dialog"
+import { Button } from "@/components/ui/button"
 import {
   useProjectActions,
   type EditorProject,
@@ -27,16 +26,29 @@ function EditorShell({
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const actions = useProjectActions()
 
-  function handleOpenChange(open: boolean) {
-    if (!open) actions.close()
-  }
-
   return (
     <div className="flex h-screen flex-col">
-      <EditorNavbar
-        isSidebarOpen={isSidebarOpen}
-        onToggleSidebar={() => setIsSidebarOpen((open) => !open)}
-      />
+      <nav className="flex h-14 w-full shrink-0 items-center border-b border-surface-border-subtle bg-surface px-3">
+        <div className="flex flex-1 items-center justify-start">
+          <Button
+            variant="outline"
+            size="icon-sm"
+            onClick={() => setIsSidebarOpen((open) => !open)}
+            aria-label={isSidebarOpen ? "Close sidebar" : "Open sidebar"}
+          >
+            {isSidebarOpen ? (
+              <PanelLeftClose className="h-4 w-4" />
+            ) : (
+              <PanelLeftOpen className="h-4 w-4" />
+            )}
+          </Button>
+        </div>
+        <div className="flex flex-1 items-center justify-center" />
+        <div className="flex flex-1 items-center justify-end">
+          <UserButton />
+        </div>
+      </nav>
+
       <ProjectSidebar
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
@@ -47,35 +59,22 @@ function EditorShell({
         onRenameProject={actions.openRename}
         onDeleteProject={actions.openDelete}
       />
-      <main className="flex flex-1 flex-col">
-        <EditorHome onCreateProject={actions.openCreate} />
+
+      <main className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+        <h1 className="text-lg font-medium text-copy-primary">
+          Create a project or open an existing one
+        </h1>
+        <p className="max-w-md text-sm text-copy-muted">
+          Start a new architecture workspace, or choose a project from the
+          sidebar.
+        </p>
+        <Button className="mt-1" onClick={actions.openCreate}>
+          <Plus className="h-4 w-4" />
+          New Project
+        </Button>
       </main>
 
-      <CreateProjectDialog
-        open={actions.activeDialog === "create"}
-        name={actions.name}
-        roomIdPreview={actions.roomIdPreview}
-        isLoading={actions.isLoading}
-        onOpenChange={handleOpenChange}
-        onNameChange={actions.setName}
-        onSubmit={actions.submitCreate}
-      />
-      <RenameProjectDialog
-        open={actions.activeDialog === "rename"}
-        name={actions.name}
-        currentName={actions.targetProject?.name ?? ""}
-        isLoading={actions.isLoading}
-        onOpenChange={handleOpenChange}
-        onNameChange={actions.setName}
-        onSubmit={actions.submitRename}
-      />
-      <DeleteProjectDialog
-        open={actions.activeDialog === "delete"}
-        projectName={actions.targetProject?.name ?? ""}
-        isLoading={actions.isLoading}
-        onOpenChange={handleOpenChange}
-        onConfirm={actions.confirmDelete}
-      />
+      <ProjectDialogs actions={actions} />
     </div>
   )
 }

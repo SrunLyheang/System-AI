@@ -1,10 +1,7 @@
 import { getAuthenticatedUserId } from "@/lib/auth";
-import { InvalidJsonBodyError, readJsonBody } from "@/lib/http";
-import {
-  deleteProject,
-  findProjectById,
-  renameProject,
-} from "@/lib/projects";
+import { readJsonObject } from "@/lib/http";
+import { requireOwnedProject } from "@/lib/project-access";
+import { deleteProject, renameProject } from "@/lib/projects";
 
 interface Context {
   params: Promise<{ projectId: string }>;
@@ -17,28 +14,16 @@ export async function PATCH(request: Request, { params }: Context) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: Record<string, unknown>;
-  try {
-    body = await readJsonBody(request);
-  } catch (error) {
-    if (error instanceof InvalidJsonBodyError) {
-      return Response.json({ error: error.message }, { status: 400 });
-    }
-    throw error;
-  }
+  const body = await readJsonObject(request);
+  if (body instanceof Response) return body;
   const name = typeof body.name === "string" ? body.name.trim() : "";
   if (name.length === 0) {
     return Response.json({ error: "name is required" }, { status: 400 });
   }
 
   const { projectId } = await params;
-  const project = await findProjectById(projectId);
-  if (!project) {
-    return Response.json({ error: "Not found" }, { status: 404 });
-  }
-  if (project.ownerId !== userId) {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const project = await requireOwnedProject(projectId, userId);
+  if (project instanceof Response) return project;
 
   const updated = await renameProject(projectId, name);
   return Response.json(updated);
@@ -52,13 +37,8 @@ export async function DELETE(_request: Request, { params }: Context) {
   }
 
   const { projectId } = await params;
-  const project = await findProjectById(projectId);
-  if (!project) {
-    return Response.json({ error: "Not found" }, { status: 404 });
-  }
-  if (project.ownerId !== userId) {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const project = await requireOwnedProject(projectId, userId);
+  if (project instanceof Response) return project;
 
   await deleteProject(projectId);
   return new Response(null, { status: 204 });

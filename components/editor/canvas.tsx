@@ -18,10 +18,13 @@ import {
   useCanRedo,
   useCanUndo,
   useHistory,
+  useOther,
+  useOthers,
   useRedo,
   useUndo,
 } from "@liveblocks/react/suspense";
-import { useLiveblocksFlow } from "@liveblocks/react-flow";
+import { Cursors, useLiveblocksFlow } from "@liveblocks/react-flow";
+import { UserButton, useAuth } from "@clerk/nextjs";
 import {
   Background,
   BackgroundVariant,
@@ -38,6 +41,7 @@ import {
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
+  useStore,
   type DefaultEdgeOptions,
   type EdgeProps,
   type EdgeTypes,
@@ -63,7 +67,14 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
+import {
+  isEditableTarget,
+  useKeyboardShortcuts,
+} from "@/hooks/use-keyboard-shortcuts";
+import {
+  useCanvasAutosave,
+  type CanvasSaveStatus,
+} from "@/hooks/use-canvas-autosave";
 import { StarterTemplatesModal } from "@/components/editor/starter-templates-modal";
 import type { CanvasTemplate } from "@/components/editor/starter-templates";
 
@@ -92,6 +103,10 @@ interface CanvasRoomProps {
   templatesOpen: boolean;
   onTemplatesOpenChange: (open: boolean) => void;
   onReady: () => void;
+  /** Reports the debounced autosave status up to the navbar Save button. */
+  onSaveStatusChange: (status: CanvasSaveStatus) => void;
+  /** Hands the navbar Save button an imperative save trigger. */
+  onRegisterSave: (save: () => void) => void;
 }
 
 /** Sets up the Liveblocks room for a project and renders the collaborative canvas. */
@@ -100,12 +115,14 @@ function CanvasRoom({
   templatesOpen,
   onTemplatesOpenChange,
   onReady,
+  onSaveStatusChange,
+  onRegisterSave,
 }: CanvasRoomProps) {
   return (
     <LiveblocksProvider authEndpoint="/api/liveblocks-auth">
       <RoomProvider
         id={roomId}
-        initialPresence={{ cursor: null, isThinking: false }}
+        initialPresence={{ cursor: null, thinking: false }}
       >
         <CanvasErrorBoundary>
           <ClientSideSuspense
@@ -113,9 +130,12 @@ function CanvasRoom({
           >
             <ReactFlowProvider>
               <Canvas
+                roomId={roomId}
                 templatesOpen={templatesOpen}
                 onTemplatesOpenChange={onTemplatesOpenChange}
                 onReady={onReady}
+                onSaveStatusChange={onSaveStatusChange}
+                onRegisterSave={onRegisterSave}
               />
             </ReactFlowProvider>
           </ClientSideSuspense>
@@ -181,6 +201,30 @@ const RESIZE_CORNERS = [
   "bottom-right",
 ] as const;
 
+/** Width in px of the widest line of a textarea's text (or its placeholder when
+ *  empty), measured in a detached span that copies the textarea's font. Used to
+ *  size the node box to its label — the textarea is `w-full`, so its own
+ *  `scrollWidth` is clamped to the current box and can't report overflow. */
+function measureLineWidth(el: HTMLTextAreaElement): number {
+  const cs = getComputedStyle(el);
+  const span = document.createElement("span");
+  span.style.cssText =
+    "position:fixed;top:-9999px;left:-9999px;white-space:pre;visibility:hidden";
+  span.style.fontFamily = cs.fontFamily;
+  span.style.fontSize = cs.fontSize;
+  span.style.fontWeight = cs.fontWeight;
+  span.style.fontStyle = cs.fontStyle;
+  span.style.letterSpacing = cs.letterSpacing;
+  document.body.appendChild(span);
+  let max = 0;
+  for (const line of (el.value || el.placeholder || "").split("\n")) {
+    span.textContent = line || " ";
+    max = Math.max(max, span.offsetWidth);
+  }
+  span.remove();
+  return max;
+}
+
 /** Renders a dropped node as its shape variant with a centered, editable label.
  *  Borders are dim at rest and full-strength when the node is selected.
  *  Selected nodes also show subtle resize handles (React Flow `NodeResizer`). */
@@ -190,8 +234,21 @@ function CanvasNodeView({ id, data, selected = false }: NodeProps<CanvasNode>) {
   // default `color`); fall back so their border/stroke/label still render.
   const color = data.color ?? DEFAULT_NODE_COLOR;
   const textColor = data.textColor ?? DEFAULT_NODE_TEXT_COLOR;
-  const { updateNode, updateNodeData, deleteElements, getNode } =
-    useReactFlow();
+  const { updateNodeData, deleteElements, getNode } = useReactFlow();
+  // Nodes are controlled by Liveblocks storage, so `useReactFlow().updateNode`
+  // (an imperative store write) gets reverted on the next storage-driven render.
+  // Push width/height through `onNodesChange` as a `dimensions` change instead —
+  // the same channel `NodeResizer` uses, which `@liveblocks/react-flow`
+  // persists to the node LiveObject.
+  const onNodesChange = useStore((s) => s.onNodesChange);
+  const setNodeSize = useCallback(
+    (width: number, height: number) => {
+      onNodesChange?.([
+        { id, type: "dimensions", dimensions: { width, height }, setAttributes: true },
+      ]);
+    },
+    [id, onNodesChange],
+  );
   const [editing, setEditing] = useState(false);
 
   // Step the node's box up/down by RESIZE_STEP, clamped, keeping its ratio.
@@ -203,9 +260,9 @@ function CanvasNodeView({ id, data, selected = false }: NodeProps<CanvasNode>) {
       const h = node.height ?? node.measured?.height ?? MIN_NODE_SIZE;
       const clamp = (v: number) =>
         Math.max(MIN_NODE_SIZE, Math.min(MAX_NODE_SIZE, Math.round(v)));
-      updateNode(id, { width: clamp(w * factor), height: clamp(h * factor) });
+      setNodeSize(clamp(w * factor), clamp(h * factor));
     },
-    [getNode, id, updateNode],
+    [getNode, id, setNodeSize],
   );
 
   const stopEditing = useCallback(() => setEditing(false), []);
@@ -216,16 +273,36 @@ function CanvasNodeView({ id, data, selected = false }: NodeProps<CanvasNode>) {
     }
   }, []);
 
-  // Grow the textarea to fit its text so the flex parent can keep it centered.
-  const fitHeight = (el: HTMLTextAreaElement) => {
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
-  };
-  const initTextarea = useCallback((el: HTMLTextAreaElement | null) => {
-    if (!el) return;
-    fitHeight(el);
-    el.select();
-  }, []);
+  // Grow the node box to fit its label (on double-click and on every keystroke)
+  // so the text stays visible inside the shape. The textarea is `w-full`, so its
+  // own `scrollWidth` is clamped to the box — measure the text in a detached
+  // span that copies the textarea's font instead. Grow-only, matching the
+  // sticky behaviour of manual resize.
+  const fitSize = useCallback(
+    (el: HTMLTextAreaElement) => {
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight}px`;
+      const node = getNode(id);
+      const curW = node?.width ?? node?.measured?.width ?? MIN_NODE_SIZE;
+      const curH = node?.height ?? node?.measured?.height ?? MIN_NODE_SIZE;
+      // Wrapper padding: px-3 (12px each side), py-2 (8px each side); +2px so
+      // the caret at the end of the widest line isn't clipped.
+      const needW = Math.min(MAX_NODE_SIZE, Math.ceil(measureLineWidth(el) + 26));
+      const needH = Math.min(MAX_NODE_SIZE, Math.ceil(el.scrollHeight + 16));
+      if (needW > curW || needH > curH) {
+        setNodeSize(Math.max(curW, needW), Math.max(curH, needH));
+      }
+    },
+    [getNode, id, setNodeSize],
+  );
+  const initTextarea = useCallback(
+    (el: HTMLTextAreaElement | null) => {
+      if (!el) return;
+      fitSize(el);
+      el.select();
+    },
+    [fitSize],
+  );
 
   return (
     <div
@@ -328,7 +405,7 @@ function CanvasNodeView({ id, data, selected = false }: NodeProps<CanvasNode>) {
           defaultValue={label}
           placeholder={LABEL_PLACEHOLDER}
           onChange={(event) => {
-            fitHeight(event.currentTarget);
+            fitSize(event.currentTarget);
             updateNodeData(id, { label: event.target.value });
           }}
           onBlur={stopEditing}
@@ -586,8 +663,11 @@ function EdgeLabelInput({
           event.currentTarget.blur();
         }
       }}
-      style={{ width: `${Math.max(value.length, 5)}ch` }}
-      className="nodrag nopan rounded-full border border-surface-border bg-surface px-2 py-0.5 text-[10px] leading-none text-copy-primary outline-none"
+      // `ch` is the width of "0"; real text (esp. wide glyphs like m/w) runs
+      // wider, and the pill adds px-2 padding — a small pad keeps text from
+      // clipping while typing, and centering splits any slack evenly.
+      style={{ width: `calc(${Math.max(value.length, 4)}ch + 1.5rem)` }}
+      className="nodrag nopan rounded-full border border-surface-border bg-surface px-2 py-0.5 text-center text-[10px] leading-none text-copy-primary outline-none"
     />
   );
 }
@@ -752,15 +832,123 @@ function CanvasControls({
   );
 }
 
+type PresenceUserInfo = Liveblocks["UserMeta"]["info"];
+
+/** Two-letter initials fallback for a collaborator with no avatar image. */
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const letters = (parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "");
+  return letters.toUpperCase() || "?";
+}
+
+/** Display-only collaborator avatar — photo when available, initials otherwise.
+ *  The ring keeps it legible on the dark canvas. Same 28px box as UserButton. */
+function PresenceAvatar({ info }: { info: PresenceUserInfo }) {
+  const ring = "h-7 w-7 rounded-full ring-2 ring-surface";
+  if (info.avatar) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={info.avatar}
+        alt={info.name}
+        title={info.name}
+        className={`${ring} object-cover`}
+      />
+    );
+  }
+  return (
+    <span
+      title={info.name}
+      className={`${ring} flex items-center justify-center text-[11px] font-semibold text-white`}
+      style={{ background: info.color }}
+    >
+      {initialsOf(info.name)}
+    </span>
+  );
+}
+
+/** Top-right participant group: collaborator avatars (current user filtered out
+ *  by Clerk ID), then the current user's own Clerk UserButton. Divider only
+ *  when at least one collaborator is present. */
+function PresencePanel() {
+  const { userId } = useAuth();
+  const others = useOthers();
+
+  // One entry per distinct collaborator user ID, excluding the current user
+  // (who may also be connected from another tab).
+  const byId = new Map<string, PresenceUserInfo>();
+  for (const other of others) {
+    if (other.id && other.id !== userId && !byId.has(other.id)) {
+      byId.set(other.id, other.info);
+    }
+  }
+  const collaborators = [...byId.values()];
+  const shown = collaborators.slice(0, 5);
+  const overflow = collaborators.length - shown.length;
+
+  return (
+    <Panel position="top-right">
+      <div className="flex items-center gap-1 rounded-full border border-surface-border bg-surface/90 px-2 py-1.5 shadow-lg backdrop-blur">
+        {shown.length > 0 && (
+          <div className="flex items-center -space-x-2">
+            {shown.map((info, i) => (
+              <PresenceAvatar key={`${info.name}-${i}`} info={info} />
+            ))}
+            {overflow > 0 && (
+              <span className="z-10 flex h-7 w-7 items-center justify-center rounded-full bg-elevated text-[11px] font-medium text-copy-secondary ring-2 ring-surface">
+                +{overflow}
+              </span>
+            )}
+          </div>
+        )}
+        {shown.length > 0 && (
+          <span className="mx-1 h-5 w-px bg-surface-border" />
+        )}
+        <UserButton />
+      </div>
+    </Panel>
+  );
+}
+
+/** One live cursor for another participant, colored by their presence color. */
+function CanvasCursor({ connectionId }: { connectionId: number }) {
+  const info = useOther(connectionId, (user) => user.info);
+  if (!info) return null;
+  return (
+    <div className="pointer-events-none flex items-start">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill={info.color}>
+        <path
+          d="M4 2 L20 12 L12.5 13 L9 21 Z"
+          stroke="var(--bg-base)"
+          strokeWidth="1.5"
+          strokeLinejoin="round"
+        />
+      </svg>
+      <span
+        className="ml-0.5 -mt-0.5 rounded-md px-1.5 py-0.5 text-[11px] font-medium leading-none text-white shadow-sm"
+        style={{ background: info.color }}
+      >
+        {info.name}
+      </span>
+    </div>
+  );
+}
+
 /** React Flow surface wired to Liveblocks-synced nodes and edges. */
 function Canvas({
+  roomId,
   templatesOpen,
   onTemplatesOpenChange,
   onReady,
+  onSaveStatusChange,
+  onRegisterSave,
 }: {
+  roomId: string;
   templatesOpen: boolean;
   onTemplatesOpenChange: (open: boolean) => void;
   onReady: () => void;
+  onSaveStatusChange: (status: CanvasSaveStatus) => void;
+  onRegisterSave: (save: () => void) => void;
 }) {
   const { nodes, edges, onNodesChange, onEdgesChange, onConnect, onDelete } =
     useLiveblocksFlow<CanvasNode, CanvasEdge>({
@@ -779,6 +967,99 @@ function Canvas({
   useEffect(() => {
     onReady();
   }, [onReady]);
+
+  // Load-on-open: if this room has no synced nodes/edges yet and the project
+  // has a saved canvas blob, pull it in. Re-checks emptiness after the fetch so
+  // a collaborator populating the room mid-load is never overwritten.
+  const [loaded, setLoaded] = useState(false);
+  // Reset readiness in render (not the effect) when the room changes, so the
+  // autosave hook sees `enabled = false` before the new room's load starts.
+  const [loadRoom, setLoadRoom] = useState(roomId);
+  if (loadRoom !== roomId) {
+    setLoadRoom(roomId);
+    setLoaded(false);
+  }
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      // Retry indefinitely with capped backoff. Autosave is armed
+      // (`setLoaded(true)`) only after a successful read — a saved canvas, an
+      // explicit empty `{ canvas: null }`, or a room a collaborator already
+      // populated — so autosave and the manual Save button can never overwrite
+      // data we failed to read. A transient blob outage therefore delays
+      // saving but never disables it for the session; once a retry succeeds
+      // autosave arms. After a few failures the Save button shows "Error" so
+      // the stall isn't silent.
+      for (let attempt = 0; !cancelled; attempt++) {
+        try {
+          if (
+            reactFlow.getNodes().length === 0 &&
+            reactFlow.getEdges().length === 0
+          ) {
+            const res = await fetch(`/api/projects/${roomId}/canvas`);
+            if (!res.ok) throw new Error(`canvas load failed: ${res.status}`);
+            const { canvas } = (await res.json()) as {
+              canvas: { nodes?: CanvasNode[]; edges?: CanvasEdge[] } | null;
+            };
+            if (cancelled) return;
+            const savedNodes = canvas?.nodes ?? [];
+            const savedEdges = canvas?.edges ?? [];
+            if (
+              (savedNodes.length > 0 || savedEdges.length > 0) &&
+              reactFlow.getNodes().length === 0 &&
+              reactFlow.getEdges().length === 0
+            ) {
+              onNodesChange(
+                savedNodes.map((item) => ({ type: "add" as const, item })),
+              );
+              onEdgesChange(
+                savedEdges.map((item) => ({ type: "add" as const, item })),
+              );
+            }
+          }
+          if (!cancelled) {
+            // Clear any "error" shown by an earlier failed attempt; the
+            // autosave hook drives status from here on.
+            if (attempt > 0) onSaveStatusChange("idle");
+            // Arm on the next task, not synchronously after onNodesChange:
+            // @liveblocks/react-flow flushes the loaded `add` changes into
+            // `nodes`/`edges` on a later tick, and the autosave hook captures
+            // its no-write baseline from the first render where `loaded` is
+            // true. Arming now would snapshot an empty canvas and then PUT the
+            // freshly loaded content straight back.
+            setTimeout(() => {
+              if (!cancelled) setLoaded(true);
+            }, 0);
+          }
+          return;
+        } catch {
+          if (!cancelled && attempt >= 2) onSaveStatusChange("error");
+          await new Promise((r) =>
+            setTimeout(r, Math.min(1000 * (attempt + 1), 10_000)),
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [roomId, reactFlow, onNodesChange, onEdgesChange, onSaveStatusChange]);
+
+  const { status: saveStatus, save } = useCanvasAutosave(
+    roomId,
+    nodes,
+    edges,
+    loaded,
+  );
+  useEffect(() => {
+    onSaveStatusChange(saveStatus);
+  }, [saveStatus, onSaveStatusChange]);
+  useEffect(() => {
+    // Don't expose the manual save until the initial load has resolved —
+    // saving beforehand would PUT the still-empty canvas over saved state.
+    if (!loaded) return;
+    onRegisterSave(save);
+  }, [loaded, save, onRegisterSave]);
 
   const wrapperRef = useRef<HTMLDivElement>(null);
   const dropCounter = useRef(0);
@@ -831,13 +1112,48 @@ function Canvas({
     onSelectAll: selectAll,
   });
 
+  // Delete / Backspace removes the current selection through the synced
+  // `onDelete` helper — the only path that mutates Liveblocks state, so the
+  // removal syncs to every connected client. React Flow's built-in delete key
+  // is turned off (`deleteKeyCode={null}` below) so this is the single route.
+  // Selection (`node.selected` / `edge.selected`) is per-client local state.
+  // Window-level, same as useKeyboardShortcuts — a wrapper listener only fires
+  // when the canvas pane holds focus, so it missed Backspace after Cmd+A (which
+  // can leave focus on the body or a toolbar button).
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Delete" && event.key !== "Backspace") return;
+      if (isEditableTarget(event.target)) return;
+      // A dialog, menu, or popover open over the canvas (Templates, Share, a
+      // dropdown) traps focus and owns the keyboard — Backspace/Delete there
+      // must not remove the selection sitting behind it.
+      if (
+        event.target instanceof Element &&
+        event.target.closest('[role="dialog"], [role="menu"], [role="listbox"]')
+      )
+        return;
+      const selectedNodes = nodes.filter((node) => node.selected);
+      const selectedEdges = edges.filter((edge) => edge.selected);
+      if (selectedNodes.length === 0 && selectedEdges.length === 0) return;
+      event.preventDefault();
+      onDelete({ nodes: selectedNodes, edges: selectedEdges });
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [nodes, edges, onDelete]);
+
   const addShape = useCallback(
-    (payload: ShapeDragPayload, position: { x: number; y: number }) => {
+    // `center` is where the shape's center should land, in flow coords; React Flow
+    // node positions are the top-left corner, so shift by half the shape size.
+    (payload: ShapeDragPayload, center: { x: number; y: number }) => {
       const id = `${payload.shape}-${Date.now()}-${dropCounter.current++}`;
       const node: CanvasNode = {
         id,
         type: CANVAS_NODE_TYPE,
-        position,
+        position: {
+          x: center.x - payload.width / 2,
+          y: center.y - payload.height / 2,
+        },
         width: payload.width,
         height: payload.height,
         data: {
@@ -1037,6 +1353,9 @@ function Canvas({
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onDelete={onDelete}
+        // All keyboard deletion goes through our own wrapper listener above, so
+        // it can filter out edits in text fields and route through `onDelete`.
+        deleteKeyCode={null}
         connectionMode={ConnectionMode.Loose}
         // Connections require an actual drag between two dots. Without this,
         // React Flow's click-to-connect (on by default) turns a click that
@@ -1046,6 +1365,8 @@ function Canvas({
         fitView
       >
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
+        <Cursors components={{ Cursor: CanvasCursor }} />
+        <PresencePanel />
         <CanvasControls
           onUndo={undo}
           onRedo={redo}

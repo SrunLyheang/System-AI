@@ -4,9 +4,12 @@ import {
   listCollaborators,
   removeCollaborator,
 } from "@/lib/collaborators";
-import { InvalidJsonBodyError, readJsonBody } from "@/lib/http";
-import { getAccessibleProject, getCurrentIdentity } from "@/lib/project-access";
-import { findProjectById } from "@/lib/projects";
+import { readJsonObject } from "@/lib/http";
+import {
+  getAccessibleProject,
+  getCurrentIdentity,
+  requireOwnedProject,
+} from "@/lib/project-access";
 
 interface Context {
   params: Promise<{ projectId: string }>;
@@ -43,15 +46,8 @@ export async function POST(request: Request, { params }: Context) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: Record<string, unknown>;
-  try {
-    body = await readJsonBody(request);
-  } catch (error) {
-    if (error instanceof InvalidJsonBodyError) {
-      return Response.json({ error: error.message }, { status: 400 });
-    }
-    throw error;
-  }
+  const body = await readJsonObject(request);
+  if (body instanceof Response) return body;
   const email =
     typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
   if (!EMAIL_RE.test(email)) {
@@ -59,13 +55,8 @@ export async function POST(request: Request, { params }: Context) {
   }
 
   const { projectId } = await params;
-  const project = await findProjectById(projectId);
-  if (!project) {
-    return Response.json({ error: "Not found" }, { status: 404 });
-  }
-  if (project.ownerId !== identity.userId) {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const project = await requireOwnedProject(projectId, identity.userId);
+  if (project instanceof Response) return project;
 
   await addCollaborator(projectId, email);
   return Response.json({ email }, { status: 201 });
@@ -87,13 +78,8 @@ export async function DELETE(request: Request, { params }: Context) {
   }
 
   const { projectId } = await params;
-  const project = await findProjectById(projectId);
-  if (!project) {
-    return Response.json({ error: "Not found" }, { status: 404 });
-  }
-  if (project.ownerId !== identity.userId) {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const project = await requireOwnedProject(projectId, identity.userId);
+  if (project instanceof Response) return project;
 
   await removeCollaborator(projectId, email);
   return new Response(null, { status: 204 });
