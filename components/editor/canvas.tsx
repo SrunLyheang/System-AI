@@ -982,12 +982,15 @@ function Canvas({
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      // ponytail: fixed 3-try backoff. Autosave is armed (`setLoaded(true)`)
-      // only after a successful read — a saved canvas, an explicit empty
-      // `{ canvas: null }`, or a room a collaborator already populated. On a
-      // non-OK response or fetch/JSON failure `loaded` stays false so autosave
-      // and the manual Save button can't overwrite data we never read.
-      for (let attempt = 0; attempt < 3 && !cancelled; attempt++) {
+      // Retry indefinitely with capped backoff. Autosave is armed
+      // (`setLoaded(true)`) only after a successful read — a saved canvas, an
+      // explicit empty `{ canvas: null }`, or a room a collaborator already
+      // populated — so autosave and the manual Save button can never overwrite
+      // data we failed to read. A transient blob outage therefore delays
+      // saving but never disables it for the session; once a retry succeeds
+      // autosave arms. After a few failures the Save button shows "Error" so
+      // the stall isn't silent.
+      for (let attempt = 0; !cancelled; attempt++) {
         try {
           if (
             reactFlow.getNodes().length === 0 &&
@@ -1014,17 +1017,33 @@ function Canvas({
               );
             }
           }
-          if (!cancelled) setLoaded(true);
+          if (!cancelled) {
+            // Clear any "error" shown by an earlier failed attempt; the
+            // autosave hook drives status from here on.
+            if (attempt > 0) onSaveStatusChange("idle");
+            // Arm on the next task, not synchronously after onNodesChange:
+            // @liveblocks/react-flow flushes the loaded `add` changes into
+            // `nodes`/`edges` on a later tick, and the autosave hook captures
+            // its no-write baseline from the first render where `loaded` is
+            // true. Arming now would snapshot an empty canvas and then PUT the
+            // freshly loaded content straight back.
+            setTimeout(() => {
+              if (!cancelled) setLoaded(true);
+            }, 0);
+          }
           return;
         } catch {
-          await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+          if (!cancelled && attempt >= 2) onSaveStatusChange("error");
+          await new Promise((r) =>
+            setTimeout(r, Math.min(1000 * (attempt + 1), 10_000)),
+          );
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [roomId, reactFlow, onNodesChange, onEdgesChange]);
+  }, [roomId, reactFlow, onNodesChange, onEdgesChange, onSaveStatusChange]);
 
   const { status: saveStatus, save } = useCanvasAutosave(
     roomId,
@@ -1105,6 +1124,14 @@ function Canvas({
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key !== "Delete" && event.key !== "Backspace") return;
       if (isEditableTarget(event.target)) return;
+      // A dialog, menu, or popover open over the canvas (Templates, Share, a
+      // dropdown) traps focus and owns the keyboard — Backspace/Delete there
+      // must not remove the selection sitting behind it.
+      if (
+        event.target instanceof Element &&
+        event.target.closest('[role="dialog"], [role="menu"], [role="listbox"]')
+      )
+        return;
       const selectedNodes = nodes.filter((node) => node.selected);
       const selectedEdges = edges.filter((edge) => edge.selected);
       if (selectedNodes.length === 0 && selectedEdges.length === 0) return;

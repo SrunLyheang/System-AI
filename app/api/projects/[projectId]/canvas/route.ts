@@ -4,6 +4,8 @@ import { readJsonObject } from "@/lib/http";
 import { getAccessibleProject, getCurrentIdentity } from "@/lib/project-access";
 import { setProjectCanvasPath } from "@/lib/projects";
 
+import { isCanvasEdge, isCanvasNode } from "./validate";
+
 interface Context {
   params: Promise<{ projectId: string }>;
 }
@@ -23,9 +25,17 @@ export async function PUT(request: Request, { params }: Context) {
 
   const body = await readJsonObject(request);
   if (body instanceof Response) return body;
-  if (!Array.isArray(body.nodes) || !Array.isArray(body.edges)) {
+  if (
+    !Array.isArray(body.nodes) ||
+    !Array.isArray(body.edges) ||
+    !body.nodes.every(isCanvasNode) ||
+    !body.edges.every(isCanvasEdge)
+  ) {
     return Response.json(
-      { error: "Body must be { nodes: [], edges: [] }" },
+      {
+        error:
+          "Body must be { nodes: Node[], edges: Edge[] } — nodes need id + position, edges need id, source, target",
+      },
       { status: 400 },
     );
   }
