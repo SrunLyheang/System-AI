@@ -16,11 +16,13 @@ export function listProjectsForOwner(ownerId: string) {
  * *accepted* collaborator record on, plus ones `ownerId` owns that have at least
  * one collaborator (invited or accepted). Newest first.
  */
-export function listSharedProjects(email: string, ownerId: string) {
+export function listSharedProjects(email: string | null, ownerId: string) {
   return prisma.project.findMany({
     where: {
       OR: [
-        { collaborators: { some: { email, acceptedAt: { not: null } } } },
+        ...(email
+          ? [{ collaborators: { some: { email, acceptedAt: { not: null } } } }]
+          : []),
         { ownerId, collaborators: { some: {} } },
       ],
     },

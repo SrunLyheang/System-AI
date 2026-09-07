@@ -5,7 +5,7 @@ import type { CanvasEdge, CanvasNode } from "@/types/canvas";
 export type CanvasSaveStatus = "idle" | "saving" | "saved" | "error";
 
 /** Wait this long after the last node/edge change before writing to the server. */
-const DEBOUNCE_MS = 1500;
+const DEBOUNCE_MS = 2500;
 
 /**
  * Debounced autosave for the collaborative canvas. Watches `nodes`/`edges` and,
@@ -32,6 +32,11 @@ export function useCanvasAutosave(
 
   const [status, setStatus] = useState<CanvasSaveStatus>("idle");
   const [baseline, setBaseline] = useState<string | null>(null);
+  const activeProjectId = useRef(projectId);
+
+  useEffect(() => {
+    activeProjectId.current = projectId;
+  }, [projectId]);
 
   // Switching projects: forget the old baseline until the new project's load
   // settles. Adjusting state during render is the sanctioned pattern for
@@ -51,23 +56,32 @@ export function useCanvasAutosave(
 
   // Serialize writes: each save waits for the previous one to finish, so a slow
   // older PUT can never land after — and overwrite — a newer snapshot.
-  const chain = useRef<Promise<unknown>>(Promise.resolve());
+  const chains = useRef(new Map<string, Promise<unknown>>());
 
   const save = useCallback(() => {
+    const requestProjectId = projectId;
+    const previous = chains.current.get(requestProjectId) ?? Promise.resolve();
     setStatus("saving");
-    const run = chain.current.then(() =>
-      fetch(`/api/projects/${projectId}/canvas`, {
+    const run = previous.then(() =>
+      fetch(`/api/projects/${requestProjectId}/canvas`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: payload,
       }).then((res) => {
         if (!res.ok) throw new Error(`save failed: ${res.status}`);
-        setBaseline(payload);
-        setStatus("saved");
+        if (activeProjectId.current === requestProjectId) {
+          setBaseline(payload);
+          setStatus("saved");
+        }
       }),
     );
-    chain.current = run.catch(() => {});
-    return run.catch(() => setStatus("error"));
+    const tracked = run.catch(() => {});
+    chains.current.set(requestProjectId, tracked);
+    return run.catch(() => {
+      if (activeProjectId.current === requestProjectId) {
+        setStatus("error");
+      }
+    });
   }, [projectId, payload]);
 
   useEffect(() => {

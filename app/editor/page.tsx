@@ -1,30 +1,30 @@
-import { currentUser } from "@clerk/nextjs/server"
-import { redirect } from "next/navigation"
+import { currentUser } from "@clerk/nextjs/server";
+import { redirect } from "next/navigation";
 
-import { EditorShell } from "@/components/editor/editor-shell"
+import { EditorShell } from "@/components/editor/editor-shell";
 import {
   listPendingInvites,
   listProjectsForOwner,
   listSharedProjects,
-} from "@/lib/projects"
+} from "@/lib/projects";
 
 async function EditorPage() {
-  const user = await currentUser()
+  const user = await currentUser();
   if (!user) {
-    redirect("/sign-in")
+    redirect("/sign-in");
   }
 
-  const email = user.primaryEmailAddress?.emailAddress ?? ""
+  const email = user.primaryEmailAddress?.emailAddress ?? "";
   const [owned, shared, invited] = await Promise.all([
     listProjectsForOwner(user.id),
-    email ? listSharedProjects(email, user.id) : Promise.resolve([]),
+    listSharedProjects(email || null, user.id),
     email ? listPendingInvites(email) : Promise.resolve([]),
-  ])
+  ]);
 
   const toEditorProject = (project: { id: string; name: string }) => ({
     id: project.id,
     name: project.name,
-  })
+  });
 
   return (
     <EditorShell
@@ -32,7 +32,7 @@ async function EditorPage() {
       sharedProjects={shared.map(toEditorProject)}
       pendingInvites={invited.map(toEditorProject)}
     />
-  )
+  );
 }
 
-export default EditorPage
+export default EditorPage;

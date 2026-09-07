@@ -41,6 +41,7 @@ import {
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
+  useStore,
   type DefaultEdgeOptions,
   type EdgeProps,
   type EdgeTypes,
@@ -200,6 +201,30 @@ const RESIZE_CORNERS = [
   "bottom-right",
 ] as const;
 
+/** Width in px of the widest line of a textarea's text (or its placeholder when
+ *  empty), measured in a detached span that copies the textarea's font. Used to
+ *  size the node box to its label — the textarea is `w-full`, so its own
+ *  `scrollWidth` is clamped to the current box and can't report overflow. */
+function measureLineWidth(el: HTMLTextAreaElement): number {
+  const cs = getComputedStyle(el);
+  const span = document.createElement("span");
+  span.style.cssText =
+    "position:fixed;top:-9999px;left:-9999px;white-space:pre;visibility:hidden";
+  span.style.fontFamily = cs.fontFamily;
+  span.style.fontSize = cs.fontSize;
+  span.style.fontWeight = cs.fontWeight;
+  span.style.fontStyle = cs.fontStyle;
+  span.style.letterSpacing = cs.letterSpacing;
+  document.body.appendChild(span);
+  let max = 0;
+  for (const line of (el.value || el.placeholder || "").split("\n")) {
+    span.textContent = line || " ";
+    max = Math.max(max, span.offsetWidth);
+  }
+  span.remove();
+  return max;
+}
+
 /** Renders a dropped node as its shape variant with a centered, editable label.
  *  Borders are dim at rest and full-strength when the node is selected.
  *  Selected nodes also show subtle resize handles (React Flow `NodeResizer`). */
@@ -209,8 +234,21 @@ function CanvasNodeView({ id, data, selected = false }: NodeProps<CanvasNode>) {
   // default `color`); fall back so their border/stroke/label still render.
   const color = data.color ?? DEFAULT_NODE_COLOR;
   const textColor = data.textColor ?? DEFAULT_NODE_TEXT_COLOR;
-  const { updateNode, updateNodeData, deleteElements, getNode } =
-    useReactFlow();
+  const { updateNodeData, deleteElements, getNode } = useReactFlow();
+  // Nodes are controlled by Liveblocks storage, so `useReactFlow().updateNode`
+  // (an imperative store write) gets reverted on the next storage-driven render.
+  // Push width/height through `onNodesChange` as a `dimensions` change instead —
+  // the same channel `NodeResizer` uses, which `@liveblocks/react-flow`
+  // persists to the node LiveObject.
+  const onNodesChange = useStore((s) => s.onNodesChange);
+  const setNodeSize = useCallback(
+    (width: number, height: number) => {
+      onNodesChange?.([
+        { id, type: "dimensions", dimensions: { width, height }, setAttributes: true },
+      ]);
+    },
+    [id, onNodesChange],
+  );
   const [editing, setEditing] = useState(false);
 
   // Step the node's box up/down by RESIZE_STEP, clamped, keeping its ratio.
@@ -222,9 +260,9 @@ function CanvasNodeView({ id, data, selected = false }: NodeProps<CanvasNode>) {
       const h = node.height ?? node.measured?.height ?? MIN_NODE_SIZE;
       const clamp = (v: number) =>
         Math.max(MIN_NODE_SIZE, Math.min(MAX_NODE_SIZE, Math.round(v)));
-      updateNode(id, { width: clamp(w * factor), height: clamp(h * factor) });
+      setNodeSize(clamp(w * factor), clamp(h * factor));
     },
-    [getNode, id, updateNode],
+    [getNode, id, setNodeSize],
   );
 
   const stopEditing = useCallback(() => setEditing(false), []);
@@ -235,16 +273,36 @@ function CanvasNodeView({ id, data, selected = false }: NodeProps<CanvasNode>) {
     }
   }, []);
 
-  // Grow the textarea to fit its text so the flex parent can keep it centered.
-  const fitHeight = (el: HTMLTextAreaElement) => {
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
-  };
-  const initTextarea = useCallback((el: HTMLTextAreaElement | null) => {
-    if (!el) return;
-    fitHeight(el);
-    el.select();
-  }, []);
+  // Grow the node box to fit its label (on double-click and on every keystroke)
+  // so the text stays visible inside the shape. The textarea is `w-full`, so its
+  // own `scrollWidth` is clamped to the box — measure the text in a detached
+  // span that copies the textarea's font instead. Grow-only, matching the
+  // sticky behaviour of manual resize.
+  const fitSize = useCallback(
+    (el: HTMLTextAreaElement) => {
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight}px`;
+      const node = getNode(id);
+      const curW = node?.width ?? node?.measured?.width ?? MIN_NODE_SIZE;
+      const curH = node?.height ?? node?.measured?.height ?? MIN_NODE_SIZE;
+      // Wrapper padding: px-3 (12px each side), py-2 (8px each side); +2px so
+      // the caret at the end of the widest line isn't clipped.
+      const needW = Math.min(MAX_NODE_SIZE, Math.ceil(measureLineWidth(el) + 26));
+      const needH = Math.min(MAX_NODE_SIZE, Math.ceil(el.scrollHeight + 16));
+      if (needW > curW || needH > curH) {
+        setNodeSize(Math.max(curW, needW), Math.max(curH, needH));
+      }
+    },
+    [getNode, id, setNodeSize],
+  );
+  const initTextarea = useCallback(
+    (el: HTMLTextAreaElement | null) => {
+      if (!el) return;
+      fitSize(el);
+      el.select();
+    },
+    [fitSize],
+  );
 
   return (
     <div
@@ -344,10 +402,11 @@ function CanvasNodeView({ id, data, selected = false }: NodeProps<CanvasNode>) {
         <textarea
           ref={initTextarea}
           rows={1}
+          wrap="off"
           defaultValue={label}
           placeholder={LABEL_PLACEHOLDER}
           onChange={(event) => {
-            fitHeight(event.currentTarget);
+            fitSize(event.currentTarget);
             updateNodeData(id, { label: event.target.value });
           }}
           onBlur={stopEditing}
