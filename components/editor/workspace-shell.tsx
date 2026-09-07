@@ -14,7 +14,7 @@ import { CanvasRoom } from "@/components/editor/canvas";
 import {
   CanvasSaveProvider,
   useCanvasSave,
-} from "@/components/editor/canvas-save-context";
+} from "@/components/editor/canvas/save-context";
 import { ProjectDialogs } from "@/components/editor/project-dialogs";
 import { ProjectSidebar } from "@/components/editor/project-sidebar";
 import { ShareDialog } from "@/components/editor/share-dialog";
