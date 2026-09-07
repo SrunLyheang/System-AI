@@ -71,10 +71,8 @@ import {
   isEditableTarget,
   useKeyboardShortcuts,
 } from "@/hooks/use-keyboard-shortcuts";
-import {
-  useCanvasAutosave,
-  type CanvasSaveStatus,
-} from "@/hooks/use-canvas-autosave";
+import { useCanvasPersistence } from "@/hooks/use-canvas-persistence";
+import { useRegisterCanvasSave } from "@/components/editor/canvas-save-context";
 import { StarterTemplatesModal } from "@/components/editor/starter-templates-modal";
 import type { CanvasTemplate } from "@/components/editor/starter-templates";
 
@@ -103,10 +101,6 @@ interface CanvasRoomProps {
   templatesOpen: boolean;
   onTemplatesOpenChange: (open: boolean) => void;
   onReady: () => void;
-  /** Reports the debounced autosave status up to the navbar Save button. */
-  onSaveStatusChange: (status: CanvasSaveStatus) => void;
-  /** Hands the navbar Save button an imperative save trigger. */
-  onRegisterSave: (save: () => void) => void;
 }
 
 /** Sets up the Liveblocks room for a project and renders the collaborative canvas. */
@@ -115,8 +109,6 @@ function CanvasRoom({
   templatesOpen,
   onTemplatesOpenChange,
   onReady,
-  onSaveStatusChange,
-  onRegisterSave,
 }: CanvasRoomProps) {
   return (
     <LiveblocksProvider authEndpoint="/api/liveblocks-auth">
@@ -134,8 +126,6 @@ function CanvasRoom({
                 templatesOpen={templatesOpen}
                 onTemplatesOpenChange={onTemplatesOpenChange}
                 onReady={onReady}
-                onSaveStatusChange={onSaveStatusChange}
-                onRegisterSave={onRegisterSave}
               />
             </ReactFlowProvider>
           </ClientSideSuspense>
@@ -940,15 +930,11 @@ function Canvas({
   templatesOpen,
   onTemplatesOpenChange,
   onReady,
-  onSaveStatusChange,
-  onRegisterSave,
 }: {
   roomId: string;
   templatesOpen: boolean;
   onTemplatesOpenChange: (open: boolean) => void;
   onReady: () => void;
-  onSaveStatusChange: (status: CanvasSaveStatus) => void;
-  onRegisterSave: (save: () => void) => void;
 }) {
   const { nodes, edges, onNodesChange, onEdgesChange, onConnect, onDelete } =
     useLiveblocksFlow<CanvasNode, CanvasEdge>({
@@ -968,98 +954,24 @@ function Canvas({
     onReady();
   }, [onReady]);
 
-  // Load-on-open: if this room has no synced nodes/edges yet and the project
-  // has a saved canvas blob, pull it in. Re-checks emptiness after the fetch so
-  // a collaborator populating the room mid-load is never overwritten.
-  const [loaded, setLoaded] = useState(false);
-  // Reset readiness in render (not the effect) when the room changes, so the
-  // autosave hook sees `enabled = false` before the new room's load starts.
-  const [loadRoom, setLoadRoom] = useState(roomId);
-  if (loadRoom !== roomId) {
-    setLoadRoom(roomId);
-    setLoaded(false);
-  }
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      // Retry indefinitely with capped backoff. Autosave is armed
-      // (`setLoaded(true)`) only after a successful read — a saved canvas, an
-      // explicit empty `{ canvas: null }`, or a room a collaborator already
-      // populated — so autosave and the manual Save button can never overwrite
-      // data we failed to read. A transient blob outage therefore delays
-      // saving but never disables it for the session; once a retry succeeds
-      // autosave arms. After a few failures the Save button shows "Error" so
-      // the stall isn't silent.
-      for (let attempt = 0; !cancelled; attempt++) {
-        try {
-          if (
-            reactFlow.getNodes().length === 0 &&
-            reactFlow.getEdges().length === 0
-          ) {
-            const res = await fetch(`/api/projects/${roomId}/canvas`);
-            if (!res.ok) throw new Error(`canvas load failed: ${res.status}`);
-            const { canvas } = (await res.json()) as {
-              canvas: { nodes?: CanvasNode[]; edges?: CanvasEdge[] } | null;
-            };
-            if (cancelled) return;
-            const savedNodes = canvas?.nodes ?? [];
-            const savedEdges = canvas?.edges ?? [];
-            if (
-              (savedNodes.length > 0 || savedEdges.length > 0) &&
-              reactFlow.getNodes().length === 0 &&
-              reactFlow.getEdges().length === 0
-            ) {
-              onNodesChange(
-                savedNodes.map((item) => ({ type: "add" as const, item })),
-              );
-              onEdgesChange(
-                savedEdges.map((item) => ({ type: "add" as const, item })),
-              );
-            }
-          }
-          if (!cancelled) {
-            // Clear any "error" shown by an earlier failed attempt; the
-            // autosave hook drives status from here on.
-            if (attempt > 0) onSaveStatusChange("idle");
-            // Arm on the next task, not synchronously after onNodesChange:
-            // @liveblocks/react-flow flushes the loaded `add` changes into
-            // `nodes`/`edges` on a later tick, and the autosave hook captures
-            // its no-write baseline from the first render where `loaded` is
-            // true. Arming now would snapshot an empty canvas and then PUT the
-            // freshly loaded content straight back.
-            setTimeout(() => {
-              if (!cancelled) setLoaded(true);
-            }, 0);
-          }
-          return;
-        } catch {
-          if (!cancelled && attempt >= 2) onSaveStatusChange("error");
-          await new Promise((r) =>
-            setTimeout(r, Math.min(1000 * (attempt + 1), 10_000)),
-          );
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [roomId, reactFlow, onNodesChange, onEdgesChange, onSaveStatusChange]);
-
-  const { status: saveStatus, save } = useCanvasAutosave(
+  // Load-on-open + debounced autosave, both behind one interface. The hook pulls
+  // the saved blob into an empty room (retrying a transient outage), arms save
+  // only after that read settles, and exposes a `save` that no-ops until then.
+  const { status: saveStatus, save } = useCanvasPersistence({
     roomId,
     nodes,
     edges,
-    loaded,
-  );
+    reactFlow,
+    onNodesChange,
+    onEdgesChange,
+  });
+
+  // Publish status + save to the workspace navbar's Save button (rendered
+  // outside the Liveblocks room) via context, not a prop relay.
+  const registerCanvasSave = useRegisterCanvasSave();
   useEffect(() => {
-    onSaveStatusChange(saveStatus);
-  }, [saveStatus, onSaveStatusChange]);
-  useEffect(() => {
-    // Don't expose the manual save until the initial load has resolved —
-    // saving beforehand would PUT the still-empty canvas over saved state.
-    if (!loaded) return;
-    onRegisterSave(save);
-  }, [loaded, save, onRegisterSave]);
+    registerCanvasSave({ status: saveStatus, save: () => void save() });
+  }, [registerCanvasSave, saveStatus, save]);
 
   const wrapperRef = useRef<HTMLDivElement>(null);
   const dropCounter = useRef(0);
