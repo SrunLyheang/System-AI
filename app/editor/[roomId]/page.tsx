@@ -30,7 +30,9 @@ async function WorkspacePage({ params }: WorkspacePageProps) {
 
   const [owned, shared, invited] = await Promise.all([
     listProjectsForOwner(identity.userId),
-    identity.email ? listSharedProjects(identity.email) : Promise.resolve([]),
+    identity.email
+      ? listSharedProjects(identity.email, identity.userId)
+      : Promise.resolve([]),
     identity.email ? listPendingInvites(identity.email) : Promise.resolve([]),
   ])
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { CanvasEdge, CanvasNode } from "@/types/canvas";
 
@@ -49,19 +49,25 @@ export function useCanvasAutosave(
     setBaseline(payload);
   }
 
+  // Serialize writes: each save waits for the previous one to finish, so a slow
+  // older PUT can never land after — and overwrite — a newer snapshot.
+  const chain = useRef<Promise<unknown>>(Promise.resolve());
+
   const save = useCallback(() => {
     setStatus("saving");
-    return fetch(`/api/projects/${projectId}/canvas`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: payload,
-    })
-      .then((res) => {
+    const run = chain.current.then(() =>
+      fetch(`/api/projects/${projectId}/canvas`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: payload,
+      }).then((res) => {
         if (!res.ok) throw new Error(`save failed: ${res.status}`);
         setBaseline(payload);
         setStatus("saved");
-      })
-      .catch(() => setStatus("error"));
+      }),
+    );
+    chain.current = run.catch(() => {});
+    return run.catch(() => setStatus("error"));
   }, [projectId, payload]);
 
   useEffect(() => {

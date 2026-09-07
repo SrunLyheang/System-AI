@@ -83,8 +83,19 @@ export async function GET(_request: Request, { params }: Context) {
     access: "private",
     useCache: false,
   });
-  if (!result || result.statusCode !== 200) {
+  // `get` returns null only when the blob is genuinely missing (never saved, or
+  // a stale pointer) — that is the one case that means "unsaved canvas". Read /
+  // auth failures throw and propagate as a 500; a non-200 result (e.g. an
+  // unexpected 304) is surfaced as an error too, never flattened into an empty
+  // canvas the client would then overwrite real state with.
+  if (!result) {
     return Response.json({ canvas: null });
+  }
+  if (result.statusCode !== 200) {
+    return Response.json(
+      { error: "Failed to read saved canvas" },
+      { status: 502 },
+    );
   }
   const canvas = await new Response(result.stream).json();
   return Response.json({ canvas });

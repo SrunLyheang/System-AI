@@ -921,20 +921,26 @@ function Canvas({
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      try {
-        if (
-          reactFlow.getNodes().length === 0 &&
-          reactFlow.getEdges().length === 0
-        ) {
-          const res = await fetch(`/api/projects/${roomId}/canvas`);
-          if (res.ok && !cancelled) {
+      // ponytail: fixed 3-try backoff. Autosave is armed (`setLoaded(true)`)
+      // only after a successful read — a saved canvas, an explicit empty
+      // `{ canvas: null }`, or a room a collaborator already populated. On a
+      // non-OK response or fetch/JSON failure `loaded` stays false so autosave
+      // and the manual Save button can't overwrite data we never read.
+      for (let attempt = 0; attempt < 3 && !cancelled; attempt++) {
+        try {
+          if (
+            reactFlow.getNodes().length === 0 &&
+            reactFlow.getEdges().length === 0
+          ) {
+            const res = await fetch(`/api/projects/${roomId}/canvas`);
+            if (!res.ok) throw new Error(`canvas load failed: ${res.status}`);
             const { canvas } = (await res.json()) as {
               canvas: { nodes?: CanvasNode[]; edges?: CanvasEdge[] } | null;
             };
+            if (cancelled) return;
             const savedNodes = canvas?.nodes ?? [];
             const savedEdges = canvas?.edges ?? [];
             if (
-              !cancelled &&
               (savedNodes.length > 0 || savedEdges.length > 0) &&
               reactFlow.getNodes().length === 0 &&
               reactFlow.getEdges().length === 0
@@ -947,11 +953,12 @@ function Canvas({
               );
             }
           }
+          if (!cancelled) setLoaded(true);
+          return;
+        } catch {
+          await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
         }
-      } catch {
-        // A failed load just means we start from the current (empty) room.
       }
-      if (!cancelled) setLoaded(true);
     })();
     return () => {
       cancelled = true;
@@ -968,8 +975,11 @@ function Canvas({
     onSaveStatusChange(saveStatus);
   }, [saveStatus, onSaveStatusChange]);
   useEffect(() => {
+    // Don't expose the manual save until the initial load has resolved —
+    // saving beforehand would PUT the still-empty canvas over saved state.
+    if (!loaded) return;
     onRegisterSave(save);
-  }, [save, onRegisterSave]);
+  }, [loaded, save, onRegisterSave]);
 
   const wrapperRef = useRef<HTMLDivElement>(null);
   const dropCounter = useRef(0);
@@ -1027,9 +1037,10 @@ function Canvas({
   // removal syncs to every connected client. React Flow's built-in delete key
   // is turned off (`deleteKeyCode={null}` below) so this is the single route.
   // Selection (`node.selected` / `edge.selected`) is per-client local state.
+  // Window-level, same as useKeyboardShortcuts — a wrapper listener only fires
+  // when the canvas pane holds focus, so it missed Backspace after Cmd+A (which
+  // can leave focus on the body or a toolbar button).
   useEffect(() => {
-    const wrap = wrapperRef.current;
-    if (!wrap) return;
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key !== "Delete" && event.key !== "Backspace") return;
       if (isEditableTarget(event.target)) return;
@@ -1039,17 +1050,22 @@ function Canvas({
       event.preventDefault();
       onDelete({ nodes: selectedNodes, edges: selectedEdges });
     };
-    wrap.addEventListener("keydown", onKeyDown);
-    return () => wrap.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, [nodes, edges, onDelete]);
 
   const addShape = useCallback(
-    (payload: ShapeDragPayload, position: { x: number; y: number }) => {
+    // `center` is where the shape's center should land, in flow coords; React Flow
+    // node positions are the top-left corner, so shift by half the shape size.
+    (payload: ShapeDragPayload, center: { x: number; y: number }) => {
       const id = `${payload.shape}-${Date.now()}-${dropCounter.current++}`;
       const node: CanvasNode = {
         id,
         type: CANVAS_NODE_TYPE,
-        position,
+        position: {
+          x: center.x - payload.width / 2,
+          y: center.y - payload.height / 2,
+        },
         width: payload.width,
         height: payload.height,
         data: {

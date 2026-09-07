@@ -11,10 +11,19 @@ export function listProjectsForOwner(ownerId: string) {
   });
 }
 
-/** List the projects `email` has an *accepted* collaborator record on, newest first. */
-export function listSharedProjects(email: string) {
+/**
+ * List the projects that belong in the user's "Shared" tab: ones `email` has an
+ * *accepted* collaborator record on, plus ones `ownerId` owns that have at least
+ * one collaborator (invited or accepted). Newest first.
+ */
+export function listSharedProjects(email: string, ownerId: string) {
   return prisma.project.findMany({
-    where: { collaborators: { some: { email, acceptedAt: { not: null } } } },
+    where: {
+      OR: [
+        { collaborators: { some: { email, acceptedAt: { not: null } } } },
+        { ownerId, collaborators: { some: {} } },
+      ],
+    },
     orderBy: { createdAt: "desc" },
   });
 }

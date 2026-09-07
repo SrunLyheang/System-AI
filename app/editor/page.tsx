@@ -17,7 +17,7 @@ async function EditorPage() {
   const email = user.primaryEmailAddress?.emailAddress ?? ""
   const [owned, shared, invited] = await Promise.all([
     listProjectsForOwner(user.id),
-    email ? listSharedProjects(email) : Promise.resolve([]),
+    email ? listSharedProjects(email, user.id) : Promise.resolve([]),
     email ? listPendingInvites(email) : Promise.resolve([]),
   ])
 
