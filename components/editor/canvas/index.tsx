@@ -213,6 +213,8 @@ function Canvas({
         // lands on a node's enlarged handle zone into a pending connection,
         // and the next node click completes it — a stray arrow appears.
         connectOnClick={false}
+        // Hide the "React Flow" attribution badge.
+        proOptions={{ hideAttribution: true }}
         // Two-finger trackpad scroll pans the canvas; pinch (ctrl+wheel) still
         // zooms via React Flow's zoomOnPinch default.
         panOnScroll

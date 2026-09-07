@@ -106,6 +106,12 @@ body {
   color: var(--text-primary);
 }
 
+/* Liveblocks injects a fixed "Powered by Liveblocks" badge (#liveblocks-badge)
+   on the free plan via room meta.showBrand. Hide it. */
+#liveblocks-badge {
+  display: none !important;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
