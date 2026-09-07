@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   LayoutTemplate,
@@ -11,7 +11,10 @@ import {
 } from "lucide-react";
 
 import { CanvasRoom } from "@/components/editor/canvas";
-import type { CanvasSaveStatus } from "@/hooks/use-canvas-autosave";
+import {
+  CanvasSaveProvider,
+  useCanvasSave,
+} from "@/components/editor/canvas/save-context";
 import { ProjectDialogs } from "@/components/editor/project-dialogs";
 import { ProjectSidebar } from "@/components/editor/project-sidebar";
 import { ShareDialog } from "@/components/editor/share-dialog";
@@ -42,13 +45,6 @@ function WorkspaceShell({
   const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false);
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<CanvasSaveStatus>("idle");
-  // The canvas (inside the Liveblocks room) owns the real save function; it
-  // registers it here so the navbar button can trigger a manual save.
-  const manualSaveRef = useRef<() => void>(() => {});
-  const registerSave = useCallback((save: () => void) => {
-    manualSaveRef.current = save;
-  }, []);
   // Canvas readiness is per-project: store the id the canvas reported ready for
   // and gate Templates on it matching the active project. A late onReady from a
   // previous CanvasRoom carries the old id, so it can never mark the new one
@@ -64,7 +60,8 @@ function WorkspaceShell({
   }
 
   return (
-    <div className="flex h-screen flex-col">
+    <CanvasSaveProvider>
+      <div className="flex h-screen flex-col">
       <nav className="flex h-14 w-full shrink-0 items-center gap-3 border-b border-surface-border-subtle bg-surface px-3">
         <div className="flex flex-1 items-center gap-3 overflow-hidden">
           <Button
@@ -84,10 +81,7 @@ function WorkspaceShell({
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <SaveButton
-            status={saveStatus}
-            onSave={() => manualSaveRef.current()}
-          />
+          <SaveButton />
           <Button
             variant="outline"
             size="sm"
@@ -137,8 +131,6 @@ function WorkspaceShell({
             templatesOpen={isTemplatesOpen}
             onTemplatesOpenChange={setIsTemplatesOpen}
             onReady={() => setReadyProjectId(project.id)}
-            onSaveStatusChange={setSaveStatus}
-            onRegisterSave={registerSave}
           />
         </main>
 
@@ -162,7 +154,8 @@ function WorkspaceShell({
         projectId={project.id}
         canManage={canManageShare}
       />
-    </div>
+      </div>
+    </CanvasSaveProvider>
   );
 }
 
@@ -170,13 +163,8 @@ function WorkspaceShell({
  *  lets the user save on demand. Reflects the shared save status: "Saving..."
  *  while in flight, then a brief "Saved" / "Error" flash before returning to
  *  "Save". Rendered only here, so it never appears on the editor-home navbar. */
-function SaveButton({
-  status,
-  onSave,
-}: {
-  status: CanvasSaveStatus;
-  onSave: () => void;
-}) {
+function SaveButton() {
+  const { status, save } = useCanvasSave();
   // Show "Saved"/"Error" for a moment after a save settles, then fall back.
   const [flash, setFlash] = useState<"saved" | "error" | null>(null);
   const [prevStatus, setPrevStatus] = useState(status);
@@ -203,7 +191,7 @@ function SaveButton({
     <Button
       variant="outline"
       size="sm"
-      onClick={onSave}
+      onClick={() => save()}
       disabled={status === "saving"}
     >
       {label}
