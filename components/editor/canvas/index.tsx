@@ -1,6 +1,12 @@
 "use client";
 
-import { Component, useCallback, useEffect, useRef, type ReactNode } from "react";
+import {
+  Component,
+  useCallback,
+  useEffect,
+  useRef,
+  type ReactNode,
+} from "react";
 
 import {
   ClientSideSuspense,
@@ -126,6 +132,12 @@ function Canvas({
   useEffect(() => {
     registerCanvasSave({ status: saveStatus, save: () => void save() });
   }, [registerCanvasSave, saveStatus, save]);
+  // Reset the shared save state when the canvas leaves (room switch / navigate
+  // away) so the navbar button never holds a stale closure. Unmount-only —
+  // `registerCanvasSave` is stable, so this never churns on an edit.
+  useEffect(() => {
+    return () => registerCanvasSave({ status: "idle", save: () => {} });
+  }, [registerCanvasSave]);
 
   const wrapperRef = useRef<HTMLDivElement>(null);
 
@@ -201,6 +213,9 @@ function Canvas({
         // lands on a node's enlarged handle zone into a pending connection,
         // and the next node click completes it — a stray arrow appears.
         connectOnClick={false}
+        // Two-finger trackpad scroll pans the canvas; pinch (ctrl+wheel) still
+        // zooms via React Flow's zoomOnPinch default.
+        panOnScroll
         fitView
       >
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />

@@ -39,15 +39,18 @@ export function useTemplateImport({
   return useCallback(
     (template: CanvasTemplate) => {
       history.pause();
-      onDelete({ nodes, edges });
-      onNodesChange(
-        template.nodes.map((item) => ({ type: "add" as const, item })),
-      );
-      onEdgesChange(
-        template.edges.map((item) => ({ type: "add" as const, item })),
-      );
-      history.resume();
-      // ponytail: fixed delay to let the synced state settle before fitting.
+      try {
+        onDelete({ nodes, edges });
+        onNodesChange(
+          template.nodes.map((item) => ({ type: "add" as const, item })),
+        );
+        onEdgesChange(
+          template.edges.map((item) => ({ type: "add" as const, item })),
+        );
+      } finally {
+        history.resume();
+      }
+
       window.setTimeout(() => reactFlow.fitView({ duration: 200 }), 80);
     },
     [history, nodes, edges, onDelete, onNodesChange, onEdgesChange, reactFlow],
