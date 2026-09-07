@@ -402,7 +402,6 @@ function CanvasNodeView({ id, data, selected = false }: NodeProps<CanvasNode>) {
         <textarea
           ref={initTextarea}
           rows={1}
-          wrap="off"
           defaultValue={label}
           placeholder={LABEL_PLACEHOLDER}
           onChange={(event) => {
@@ -664,8 +663,11 @@ function EdgeLabelInput({
           event.currentTarget.blur();
         }
       }}
-      style={{ width: `${Math.max(value.length, 5)}ch` }}
-      className="nodrag nopan rounded-full border border-surface-border bg-surface px-2 py-0.5 text-[10px] leading-none text-copy-primary outline-none"
+      // `ch` is the width of "0"; real text (esp. wide glyphs like m/w) runs
+      // wider, and the pill adds px-2 padding — a small pad keeps text from
+      // clipping while typing, and centering splits any slack evenly.
+      style={{ width: `calc(${Math.max(value.length, 4)}ch + 1.5rem)` }}
+      className="nodrag nopan rounded-full border border-surface-border bg-surface px-2 py-0.5 text-center text-[10px] leading-none text-copy-primary outline-none"
     />
   );
 }
