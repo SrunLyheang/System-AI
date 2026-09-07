@@ -54,6 +54,31 @@ export function findProjectById(id: string) {
   return prisma.project.findUnique({ where: { id } });
 }
 
+/** `{ id, name }` shape the editor sidebar and project dialogs consume. */
+export interface SidebarProject {
+  id: string;
+  name: string;
+}
+
+/**
+ * Load the three project lists the editor sidebar needs — owned, shared, and
+ * pending invites — in one round trip, each trimmed to `{ id, name }`. `email`
+ * may be empty for a user with no verified address (no shared/invited results).
+ */
+export async function loadSidebarProjects(userId: string, email: string) {
+  const [owned, shared, invited] = await Promise.all([
+    listProjectsForOwner(userId),
+    listSharedProjects(email || null, userId),
+    email ? listPendingInvites(email) : Promise.resolve([]),
+  ]);
+  const slim = (p: SidebarProject): SidebarProject => ({ id: p.id, name: p.name });
+  return {
+    owned: owned.map(slim),
+    shared: shared.map(slim),
+    pendingInvites: invited.map(slim),
+  };
+}
+
 /** Rename an existing project. */
 export function renameProject(id: string, name: string) {
   return prisma.project.update({ where: { id }, data: { name } });

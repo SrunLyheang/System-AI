@@ -3,11 +3,7 @@ import { redirect } from "next/navigation";
 import { AccessDenied } from "@/components/editor/access-denied";
 import { WorkspaceShell } from "@/components/editor/workspace-shell";
 import { getAccessibleProject, getCurrentIdentity } from "@/lib/project-access";
-import {
-  listPendingInvites,
-  listProjectsForOwner,
-  listSharedProjects,
-} from "@/lib/projects";
+import { loadSidebarProjects } from "@/lib/projects";
 
 interface WorkspacePageProps {
   params: Promise<{ roomId: string }>;
@@ -25,18 +21,17 @@ async function WorkspacePage({ params }: WorkspacePageProps) {
     return <AccessDenied />;
   }
 
-  const [owned, shared, invited] = await Promise.all([
-    listProjectsForOwner(identity.userId),
-    listSharedProjects(identity.email || null, identity.userId),
-    identity.email ? listPendingInvites(identity.email) : Promise.resolve([]),
-  ]);
+  const { owned, shared, pendingInvites } = await loadSidebarProjects(
+    identity.userId,
+    identity.email,
+  );
 
   return (
     <WorkspaceShell
       project={{ id: project.id, name: project.name }}
-      ownedProjects={owned.map((p) => ({ id: p.id, name: p.name }))}
-      sharedProjects={shared.map((p) => ({ id: p.id, name: p.name }))}
-      pendingInvites={invited.map((p) => ({ id: p.id, name: p.name }))}
+      ownedProjects={owned}
+      sharedProjects={shared}
+      pendingInvites={pendingInvites}
       canManageShare={project.ownerId === identity.userId}
     />
   );

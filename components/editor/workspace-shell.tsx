@@ -12,10 +12,8 @@ import {
 
 import { CanvasRoom } from "@/components/editor/canvas";
 import type { CanvasSaveStatus } from "@/hooks/use-canvas-autosave";
-import { CreateProjectDialog } from "@/components/editor/create-project-dialog";
-import { DeleteProjectDialog } from "@/components/editor/delete-project-dialog";
+import { ProjectDialogs } from "@/components/editor/project-dialogs";
 import { ProjectSidebar } from "@/components/editor/project-sidebar";
-import { RenameProjectDialog } from "@/components/editor/rename-project-dialog";
 import { ShareDialog } from "@/components/editor/share-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -63,10 +61,6 @@ function WorkspaceShell({
     setRenderedProjectId(project.id);
     setReadyProjectId(null);
     setIsTemplatesOpen(false);
-  }
-
-  function handleOpenChange(open: boolean) {
-    if (!open) actions.close();
   }
 
   return (
@@ -161,31 +155,7 @@ function WorkspaceShell({
         ) : null}
       </div>
 
-      <CreateProjectDialog
-        open={actions.activeDialog === "create"}
-        name={actions.name}
-        roomIdPreview={actions.roomIdPreview}
-        isLoading={actions.isLoading}
-        onOpenChange={handleOpenChange}
-        onNameChange={actions.setName}
-        onSubmit={actions.submitCreate}
-      />
-      <RenameProjectDialog
-        open={actions.activeDialog === "rename"}
-        name={actions.name}
-        currentName={actions.targetProject?.name ?? ""}
-        isLoading={actions.isLoading}
-        onOpenChange={handleOpenChange}
-        onNameChange={actions.setName}
-        onSubmit={actions.submitRename}
-      />
-      <DeleteProjectDialog
-        open={actions.activeDialog === "delete"}
-        projectName={actions.targetProject?.name ?? ""}
-        isLoading={actions.isLoading}
-        onOpenChange={handleOpenChange}
-        onConfirm={actions.confirmDelete}
-      />
+      <ProjectDialogs actions={actions} />
       <ShareDialog
         open={isShareOpen}
         onOpenChange={setIsShareOpen}

@@ -1,6 +1,6 @@
 import { get, put } from "@vercel/blob";
 
-import { InvalidJsonBodyError, readJsonBody } from "@/lib/http";
+import { readJsonObject } from "@/lib/http";
 import { getAccessibleProject, getCurrentIdentity } from "@/lib/project-access";
 import { setProjectCanvasPath } from "@/lib/projects";
 
@@ -21,15 +21,8 @@ export async function PUT(request: Request, { params }: Context) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: Record<string, unknown>;
-  try {
-    body = await readJsonBody(request);
-  } catch (error) {
-    if (error instanceof InvalidJsonBodyError) {
-      return Response.json({ error: error.message }, { status: 400 });
-    }
-    throw error;
-  }
+  const body = await readJsonObject(request);
+  if (body instanceof Response) return body;
   if (!Array.isArray(body.nodes) || !Array.isArray(body.edges)) {
     return Response.json(
       { error: "Body must be { nodes: [], edges: [] }" },

@@ -1,5 +1,5 @@
 /** Thrown by {@link readJsonBody} when the body is present but not a valid JSON object. */
-export class InvalidJsonBodyError extends Error {}
+class InvalidJsonBodyError extends Error {}
 
 /**
  * Parse a JSON request body into a plain object. Returns an empty object only
@@ -26,4 +26,22 @@ export async function readJsonBody(
     throw new InvalidJsonBodyError("Request body must be a JSON object");
   }
   return parsed as Record<string, unknown>;
+}
+
+/**
+ * Like {@link readJsonBody}, but a malformed body yields a ready-to-return
+ * `400` response instead of throwing. Route handlers do
+ * `const body = await readJsonObject(request); if (body instanceof Response) return body;`.
+ */
+export async function readJsonObject(
+  request: Request,
+): Promise<Record<string, unknown> | Response> {
+  try {
+    return await readJsonBody(request);
+  } catch (error) {
+    if (error instanceof InvalidJsonBodyError) {
+      return Response.json({ error: error.message }, { status: 400 });
+    }
+    throw error;
+  }
 }
