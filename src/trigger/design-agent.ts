@@ -1,9 +1,8 @@
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { AbortTaskRunError, logger, schemaTask } from "@trigger.dev/sdk";
 import { mutateFlow } from "@liveblocks/react-flow/node";
-import { generateObject } from "ai";
 import { z } from "zod";
 
+import { generateChatText } from "@/lib/ai";
 import { getLiveblocks } from "@/lib/liveblocks";
 import {
   AI_STORAGE_KEY,
@@ -33,21 +32,21 @@ const actionSchema = z.object({
   ]),
   /** Node id (add/move/resize/update/delete) or edge id (addEdge/deleteEdge). */
   id: z.string(),
-  shape: z.enum(NODE_SHAPES).optional(),
-  label: z.string().optional(),
-  /** Index into the fixed palette (0 = neutral default). */
-  colorIndex: z
-    .number()
-    .int()
-    .min(0)
-    .max(NODE_COLORS.length - 1)
-    .optional(),
-  x: z.number().optional(),
-  y: z.number().optional(),
-  width: z.number().optional(),
-  height: z.number().optional(),
-  source: z.string().optional(),
-  target: z.string().optional(),
+  // `.nullish()` everywhere below: Gemini's structured output emits `null` for
+  // fields it chooses to omit, and plain `.optional()` rejects `null` — that
+  // mismatch is what surfaces as "No object generated: response did not match
+  // schema". `applyAction` already treats null and undefined the same.
+  shape: z.enum(NODE_SHAPES).nullish(),
+  label: z.string().nullish(),
+  /** Index into the fixed palette (0 = neutral default). Range is clamped in
+   *  `applyAction`, so keep the schema itself permissive. */
+  colorIndex: z.number().nullish(),
+  x: z.number().nullish(),
+  y: z.number().nullish(),
+  width: z.number().nullish(),
+  height: z.number().nullish(),
+  source: z.string().nullish(),
+  target: z.string().nullish(),
 });
 
 const planSchema = z.object({
@@ -56,6 +55,53 @@ const planSchema = z.object({
 });
 
 type Action = z.infer<typeof actionSchema>;
+
+/** Appended to the system prompt. `generateText` + manual parse instead of
+ *  `generateObject`: Gemini's native structured output rejects this schema's
+ *  optional/union fields and returns "response did not match schema". */
+const JSON_FORMAT_INSTRUCTIONS = `
+
+Respond with ONLY a raw JSON object — no markdown fences, no commentary:
+{"summary": string, "actions": Action[]}
+Each Action is {"type": "addNode"|"moveNode"|"resizeNode"|"updateNode"|"deleteNode"|"addEdge"|"deleteEdge", "id": string, plus only the fields that action needs (shape, label, colorIndex, x, y, width, height, source, target). Omit unused fields entirely.`;
+
+/** Extract the first JSON object from a model reply (tolerating stray prose or
+ *  ``` fences) and validate it against `planSchema`. */
+function parsePlan(text: string): z.infer<typeof planSchema> {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end <= start) {
+    throw new Error(
+      `model reply had no JSON object (reply length ${text.length})`,
+    );
+  }
+  const parsed = planSchema.safeParse(JSON.parse(text.slice(start, end + 1)));
+  if (!parsed.success) {
+    throw new Error(`model JSON did not match schema: ${parsed.error.message}`);
+  }
+  return parsed.data;
+}
+
+function normalizeColorIndex(
+  value: number | null | undefined,
+): number | null | undefined {
+  if (value == null || !Number.isFinite(value))
+    return value == null ? value : null;
+  return Math.min(NODE_COLORS.length - 1, Math.max(0, Math.trunc(value)));
+}
+
+function redactedDiagnostic(value: unknown) {
+  if (value == null) return { present: false };
+  if (typeof value === "string") {
+    return {
+      present: true,
+      kind: "text",
+      length: Math.min(value.length, 1000),
+      truncated: value.length > 1000,
+    };
+  }
+  return { present: true, kind: typeof value };
+}
 
 /** Replace the shared `ai` Storage object so every participant sees the agent's
  *  current state. Each call writes a complete object — no partial merge. */
@@ -84,6 +130,14 @@ function systemPrompt(
     (c, i) => `${i}: fill ${c.fill} / text ${c.text}`,
   ).join("\n");
   return `You edit a collaborative diagram canvas by emitting a list of actions.
+
+The \`actions\` array is the ONLY thing that changes the canvas — \`summary\` is
+just a caption and modifies nothing. For any request that describes, asks for,
+or refines a system, you MUST return a non-empty \`actions\` array: one addNode
+per component/service/store the request implies, and one addEdge per connection
+between them. Never return an empty \`actions\` array unless the user explicitly
+asks a question that needs no canvas change. Do not describe work in \`summary\`
+that you did not emit as actions.
 
 Allowed node shapes: ${NODE_SHAPES.join(", ")}.
 Color palette (use colorIndex, never raw hex):
@@ -133,7 +187,8 @@ function applyAction(flow: MutableFlow, a: Action) {
   switch (a.type) {
     case "addNode": {
       const shape = a.shape ?? "rectangle";
-      const color = NODE_COLORS[a.colorIndex ?? 0] ?? NODE_COLORS[0];
+      const colorIndex = normalizeColorIndex(a.colorIndex);
+      const color = NODE_COLORS[colorIndex ?? 0] ?? NODE_COLORS[0];
       const size = SHAPE_DEFAULT_SIZE[shape];
       flow.addNode({
         id: a.id,
@@ -168,10 +223,11 @@ function applyAction(flow: MutableFlow, a: Action) {
     }
     case "updateNode": {
       const patch: Partial<CanvasNode["data"]> = {};
+      const colorIndex = normalizeColorIndex(a.colorIndex);
       if (a.label != null) patch.label = a.label;
       if (a.shape != null) patch.shape = a.shape;
-      if (a.colorIndex != null) {
-        const c = NODE_COLORS[a.colorIndex];
+      if (colorIndex != null) {
+        const c = NODE_COLORS[colorIndex];
         if (c) {
           patch.color = c.fill;
           patch.textColor = c.text;
@@ -247,15 +303,11 @@ export const designAgent = schemaTask({
         message: "Designing a layout…",
       });
 
-      const google = createGoogleGenerativeAI({
-        apiKey: process.env.GEMINI_API_KEY,
-      });
-      const { object: plan } = await generateObject({
-        model: google("gemini-3.6-flash"),
-        schema: planSchema,
-        system: systemPrompt(nodes, edges),
+      const text = await generateChatText({
+        system: systemPrompt(nodes, edges) + JSON_FORMAT_INSTRUCTIONS,
         prompt,
       });
+      const plan = parsePlan(text);
 
       logger.info("design-agent plan", {
         summary: plan.summary,
@@ -292,6 +344,8 @@ export const designAgent = schemaTask({
     } catch (error) {
       logger.error("design-agent failed", {
         error: error instanceof Error ? error.message : String(error),
+        modelText: redactedDiagnostic((error as { text?: unknown })?.text),
+        cause: redactedDiagnostic((error as { cause?: unknown })?.cause),
       });
       await setActivity(roomId, {
         status: "error",

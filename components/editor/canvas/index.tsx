@@ -24,7 +24,6 @@ import {
   BackgroundVariant,
   ConnectionMode,
   ReactFlow,
-  ReactFlowProvider,
   useReactFlow,
 } from "@xyflow/react";
 
@@ -91,14 +90,14 @@ function CanvasRoom({
     <ClientSideSuspense
       fallback={<CanvasMessage>Loading canvas…</CanvasMessage>}
     >
-      <ReactFlowProvider>
-        <Canvas
-          roomId={roomId}
-          templatesOpen={templatesOpen}
-          onTemplatesOpenChange={onTemplatesOpenChange}
-          onReady={onReady}
-        />
-      </ReactFlowProvider>
+      {/* ReactFlowProvider lives one level up in WorkspaceShell so the AI
+          sidebar can share this store. */}
+      <Canvas
+        roomId={roomId}
+        templatesOpen={templatesOpen}
+        onTemplatesOpenChange={onTemplatesOpenChange}
+        onReady={onReady}
+      />
     </ClientSideSuspense>
   );
 }

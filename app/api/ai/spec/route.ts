@@ -9,7 +9,7 @@ import {
   createTaskRun,
   DAILY_AI_RUN_LIMIT,
 } from "@/lib/task-runs";
-import type { designAgent } from "@/src/trigger/design-agent";
+import type { generateSpec } from "@/src/trigger/generate-spec";
 
 const CANCEL_ATTEMPTS = 3;
 
@@ -17,14 +17,17 @@ function idempotencyKeyForRequest(
   request: Request,
   userId: string,
   projectId: string,
-  roomId: string,
-  prompt: string,
+  payload: unknown,
 ) {
   const clientKey = request.headers.get("Idempotency-Key")?.trim();
-  if (clientKey) return clientKey;
+  if (clientKey) {
+    return createHash("sha256")
+      .update(JSON.stringify({ userId, projectId, clientKey }))
+      .digest("hex");
+  }
 
   return createHash("sha256")
-    .update(JSON.stringify({ userId, projectId, roomId, prompt }))
+    .update(JSON.stringify({ userId, projectId, payload }))
     .digest("hex");
 }
 
@@ -47,11 +50,13 @@ async function cancelRunWithRetry(runId: string) {
 }
 
 /**
- * POST /api/ai/design — kick off a design generation run.
+ * POST /api/ai/spec — kick off a spec generation run.
  *
- * Triggers the Trigger.dev `design-agent` task, records the run against the
- * caller and project (so the token route can verify ownership later), and
- * returns the run id for the client to subscribe to.
+ * Triggers the Trigger.dev `generate-spec` task from the current canvas + chat
+ * context, records the run against the caller and project (so the token route
+ * can verify ownership later), and returns the run id for the client to
+ * subscribe to. Project access is resolved from `roomId` and the authenticated
+ * user — a client-supplied project id is never trusted.
  */
 export async function POST(request: Request) {
   const identity = await getCurrentIdentity();
@@ -62,22 +67,22 @@ export async function POST(request: Request) {
   const body = await readJsonObject(request);
   if (body instanceof Response) return body;
 
-  const { prompt, roomId, projectId } = body;
+  const { roomId, chatHistory, nodes, edges } = body;
   if (
-    typeof prompt !== "string" ||
-    prompt.trim().length === 0 ||
     typeof roomId !== "string" ||
     roomId.length === 0 ||
-    typeof projectId !== "string" ||
-    projectId.length === 0
+    !Array.isArray(chatHistory) ||
+    !Array.isArray(nodes) ||
+    !Array.isArray(edges)
   ) {
     return Response.json(
-      { error: "Body must be { prompt, roomId, projectId }" },
+      { error: "Body must be { roomId, chatHistory, nodes, edges }" },
       { status: 400 },
     );
   }
 
-  const project = await getAccessibleProject(projectId, identity);
+  // Room id == project id, but resolve access through the authenticated user.
+  const project = await getAccessibleProject(roomId, identity);
   if (!project) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
@@ -91,31 +96,27 @@ export async function POST(request: Request) {
     );
   }
 
-  const handle = await tasks.trigger<typeof designAgent>(
-    "design-agent",
-    {
-      prompt,
-      roomId,
-    },
+  const handle = await tasks.trigger<typeof generateSpec>(
+    "generate-spec",
+    { projectId: project.id, roomId, chatHistory, nodes, edges },
     {
       idempotencyKey: idempotencyKeyForRequest(
         request,
         identity.userId,
-        projectId,
-        roomId,
-        prompt.trim(),
+        project.id,
+        { chatHistory, nodes, edges },
       ),
       idempotencyKeyTTL: "24h",
     },
   );
 
   try {
-    await createTaskRun(handle.id, projectId, identity.userId);
+    await createTaskRun(handle.id, project.id, identity.userId);
   } catch (error) {
     try {
       await cancelRunWithRetry(handle.id);
     } catch (cancelError) {
-      console.error("Failed to cancel an untracked design run", {
+      console.error("Failed to cancel an untracked spec run", {
         runId: handle.id,
         error,
         cancelError,
@@ -123,7 +124,7 @@ export async function POST(request: Request) {
     }
 
     return Response.json(
-      { error: "Unable to record design run" },
+      { error: "Unable to record spec run" },
       { status: 500 },
     );
   }
