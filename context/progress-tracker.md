@@ -4,13 +4,18 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Phase
 
+- Design agent frontend (`context/feature-specs/26-design-agent-frontend.md`) — wired the AI sidebar composer to the design-agent run. `components/editor/canvas/ai-panel.tsx` (`AiChatPanel`): on submit it posts the user message to the `ai-chat` feed, then `POST /api/ai/design` (`{ prompt, roomId, projectId }` — `roomId`/`projectId` both from `useRoom().id`), then `POST /api/ai/design/token` (`{ runId }` → `{ token }`; the backend mints the realtime token on a separate route, not in the design response), and stores `{ id, token }` in local state. `useRealtimeRun<typeof designAgent>(run?.id, { accessToken: run?.token, enabled, onComplete })` from `@trigger.dev/react-hooks` tracks the run; `onComplete` posts a final `assistant` message to `ai-chat` (`run.output.summary`, or an error line) and clears run state. While a run is active (`submitting || run !== null`) the textarea + submit button are disabled and the button shows a `Loader2` spinner. A compact status strip above the composer (`bg-elevated` + green ping dot, text from the latest `ai-status-feed` message) renders only while a run is active. Canvas node/edge/presence updates are left entirely to `useLiveblocksFlow` — the panel never touches them. New `--accent-chat-user` / `--color-chat-user` token (`#62c073`) in `globals.css` drives the user bubble bg + submit button; AI bubbles stay `bg-elevated`. Removed the old `ai-status-feed` header spinner (superseded by the strip). Backend / Trigger.dev logic untouched — done
+- Sidebar chat feed (`context/feature-specs/25-sidebar-chat-feed.md`) — real-time room chat in the AI sidebar on a dedicated Liveblocks `ai-chat` feed, kept fully separate from `ai-status-feed`. `types/tasks.ts` adds `AI_CHAT_FEED_ID = "ai-chat"` + a Zod `aiChatMessageSchema` (`{ sender, role: "user"|"assistant", content, timestamp }`) + `AiChatMessage` type. `components/editor/canvas/ai-panel.tsx` (`AiChatPanel`) now `useFeedMessages("ai-chat")` for history (sorted oldest→newest, each payload `safeParse`d before render, invalid dropped), `useCreateFeedMessage` to send from the existing composer (Enter-to-send, clears draft on success, inline error text on failure, sender name from `useSelf().info.name`), and a mount `useCreateFeed("ai-chat")` (rejection swallowed) so the feed exists before the first post. The `ai-status-feed` header indicator is untouched. No AI replies, no backend triggers — human chat only — done
+- AI presence state (`context/feature-specs/24-ai-presence-state.md`) — shared AI activity signals, UI only, no generation flow. `types/tasks.ts` defines the `ai-status-feed` payload (`AiStatusMessage` = `{ active, text? }`) + `isAiStatusMessage` runtime guard. New `components/editor/canvas/ai-panel.tsx` (`AiChatPanel`) reads the latest validated message from the `ai-status-feed` Liveblocks feed via `useFeedMessages`, shows a spinner + status line while `active`, and disables the composer textarea / send button with a loading state during generation. `EditorRoom` extracted from `canvas/index.tsx` (was inline in `CanvasRoom`) so `WorkspaceShell` wraps the canvas *and* the AI sidebar in one `RoomProvider`. `CanvasCursor` now renders a `Loader2` spinner in the name badge when the other participant's presence `thinking` is true — done
+- Design agent logic (`context/feature-specs/23-design-agent-logic.md`) — `src/trigger/design-agent.ts` now interprets the prompt with Gemini (`@ai-sdk/google` + `ai` `generateObject`) and writes real node/edge changes into the shared Liveblocks room via `mutateFlow` from `@liveblocks/react-flow/node`, plus a shared `ai` Storage object for agent presence + status that `AiActivityPanel` renders for every participant — done
+- Design agent API (`context/feature-specs/22-design-agent-api.md`) — Trigger.dev backend wiring for design generation: `POST /api/ai/design` triggers the task + records a `TaskRun`, `POST /api/ai/design/token` returns a run-scoped realtime token, minimal `src/trigger/design-agent.ts` echoes its payload. No AI logic yet — done
 - Canvas autosave (`context/feature-specs/21-canvas-autosave.md`) — debounced persistence of canvas JSON to Vercel Blob + blob URL on the Prisma project record, with load-on-open and a Save status indicator — done
 - Presence (`context/feature-specs/19-presence-avatar-cursor.md`) — participant avatar group + live cursors inside the editor canvas view — done
 - Starter templates (`context/feature-specs/18-starter-template.md`) — importable pre-built canvases with card previews, replaces canvas contents through the synced node/edge state — done
 
 ## Current Goal
 
-- Add canvas interactions (custom node/edge rendering, controls, persistence), then AI chat.
+- AI design generation is wired end to end: the AI-sidebar composer triggers `POST /api/ai/design`, mints a run-scoped token, and subscribes with `useRealtimeRun` (spec 26); the task reads the canvas, calls Gemini, and writes nodes/edges + agent presence/status back through Liveblocks (spec 23). Runtime still needs `TRIGGER_SECRET_KEY` + `GEMINI_API_KEY` in `.env.local` to exercise it.
 
 ## Completed
 
@@ -209,6 +214,49 @@ Update this file whenever the current phase, active feature, or implementation s
   - Deviation from the grilled plan: no `.check.ts` for `measureLineWidth` — it is DOM-bound (`getComputedStyle`, `document`) and there is no jsdom in the project; mocking the DOM for a font-measurement heuristic wasn't worth it.
   - Verified: `tsc --noEmit`, `eslint --max-warnings=0` on the new module + hooks, `use-canvas-persistence.check`, `npm run build` all pass. Manual canvas smoke pass (marquee, keyboard delete, shape drop, template import, presence) still pending.
 
+- Design agent API (`context/feature-specs/22-design-agent-api.md`) — backend task wiring only, no AI, no canvas writes, no UI:
+  - `prisma/models/task-run.prisma` (new): `TaskRun` model — `runId` (`@id`, so unique + indexed; spec's "unique" + "index on runId" both satisfied by the PK, no separate `id`), `projectId`, `userId`, `createdAt @default(now())`, `@@index([userId, projectId])`. Migration `20260908110232_task_run` applied; `prisma generate` re-run.
+  - `lib/task-runs.ts` (new): `createTaskRun(runId, projectId, userId)` + `findTaskRun(runId)` — thin Prisma wrappers, same pattern as `lib/projects.ts`.
+  - `src/trigger/design-agent.ts` (new): `designAgent` `schemaTask` (`id: "design-agent"`, `maxDuration: 300`, zod `{ prompt, roomId }`) — logs and echoes the payload (`{ received }`). Reuses the existing `src/trigger` setup (`trigger.config.ts` `dirs: ["./src/trigger"]`, `@trigger.dev/sdk` `^4.5.16`, `zod` `^4.4.3` already installed). `src/trigger/example.ts` scaffold left as-is.
+  - `app/api/ai/design/route.ts` (new): `POST` — `getCurrentIdentity()` → 401; body `{ prompt, roomId, projectId }` all non-empty strings else 400; `getAccessibleProject(projectId, identity)` → 404 (owner or accepted collaborator); triggers with a stable 24-hour idempotency key, records `TaskRun`, and retries remote cancellation before returning 500 if persistence fails; returns `{ runId }`.
+  - `app/api/ai/design/token/route.ts` (new): `POST` — `getAuthenticatedUserId()` → 401; body `{ runId }` non-empty string else 400; `findTaskRun(runId)` → 404 when missing or `run.userId !== userId`; `auth.createPublicToken({ scopes: { read: { runs: [runId] } } })`; returns `{ token }`. `/api/(.*)` already bypasses the proxy `auth.protect()`.
+  - Env: `TRIGGER_SECRET_KEY` (already in `.env.example`) must be set in `.env.local` before `tasks.trigger` / `auth.createPublicToken` work at runtime — not set yet (same pattern as `LIVEBLOCKS_SECRET_KEY` / `BLOB_READ_WRITE_TOKEN`).
+  - Scope limits honored: no node/edge generation, no AI provider calls, no canvas updates.
+- Verified: `prisma migrate dev`, `npm run build` (TypeScript incl.), and `eslint app/api/ai lib/task-runs.ts src/trigger/design-agent.ts --max-warnings=0` all pass; `/api/ai/design` and `/api/ai/design/token` appear as `ƒ` in the route table.
+
+- Design agent logic (`context/feature-specs/23-design-agent-logic.md`):
+  - `types/canvas.ts`: added `NODE_SHAPES` (readonly tuple — `CanvasNodeShape` now derives from it; ui-context.md already referenced it), plus `AI_STORAGE_KEY = "ai"` and the `AiActivity` type (`status`/`message`/`cursor`/`updatedAt`) — a plain JSON object (`type`, not `interface`, so it satisfies Liveblocks' Lson check), replaced whole on every write.
+  - `liveblocks.config.ts`: `Storage` went from `Record<string, never>` to `{ ai?: AiActivity }`. `useLiveblocksFlow` still owns its own `flow` subtree (internal casts), unaffected by the added optional key.
+  - `src/trigger/design-agent.ts` (rewritten from the echo stub): validates `{ prompt, roomId }`, then in one `run`:
+    1. `setActivity(roomId, { status: "thinking", … })` — writes the shared `ai` Storage object via `getLiveblocks().mutateStorage(roomId, ({ root }) => root.set("ai", next))`.
+    2. Snapshots current nodes/edges with `mutateFlow` (`@liveblocks/react-flow/node`, the backend counterpart to `useLiveblocksFlow`).
+    3. `generateObject` (`ai`) with `createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY })("gemini-2.0-flash")` and a flat `actionSchema` (zod) — one `type` enum (`addNode`/`moveNode`/`resizeNode`/`updateNode`/`deleteNode`/`addEdge`/`deleteEdge`) plus optional fields; system prompt embeds the current graph, the 6 allowed shapes, the 8-entry palette (model picks `colorIndex`, never raw hex), and grid/spacing rules.
+    4. `setActivity({ status: "generating", cursor: <first placed node> })`, then a second `mutateFlow` applies every action (`applyAction` skips actions missing required fields so a partial plan still yields a valid canvas).
+    5. `setActivity({ status: "done", message: plan.summary, cursor: null })`.
+    - Errors: caught, `setActivity({ status: "error", … })`, then `AbortTaskRunError` (structured-output/provider failures won't recover on blind retry) — the canvas is never left half-mutated by a throw mid-apply because apply is one `mutateFlow` call.
+  - `components/editor/canvas/presence.tsx`: new `AiActivityPanel` — a `<Panel position="top-center">` reading `useStorage(root => root.ai)`; pulsing dot + message while `thinking`/`generating`, `done`/`error` state fades after 5s (a `setTimeout` re-render). Rendered in `canvas/index.tsx` next to `<PresencePanel />`.
+  - `.env.example`: added `GEMINI_API_KEY=` (spec says it's already in `.env.local`).
+  - Not in scope (still `Next Up`): the client prompt box / trigger button and run subscription — spec 23's Implementation section is only the task. Without a trigger UI the flow can't be exercised end-to-end yet beyond the build gate.
+- Verified: `npx tsc --noEmit`, `eslint` on the five touched files `--max-warnings=0`, and `npm run build` all pass.
+
+- Design agent frontend (`context/feature-specs/26-design-agent-frontend.md`):
+  - `components/editor/canvas/ai-panel.tsx` (`AiChatPanel`, rewritten): the sidebar composer is now a design-prompt submit. `submit()` — posts the trimmed prompt to `ai-chat` as a `user` message, `POST /api/ai/design` with `{ prompt, roomId, projectId }` (both ids from `useRoom().id`, since room id == project id here), then `POST /api/ai/design/token` with `{ runId }` for the run-scoped realtime token, and stores `{ id, token }` in `run` state. The spec's `{ runId, publicToken }` single response doesn't match the backend — token comes from the separate `/token` route — so the client makes both calls.
+  - Run tracking: `useRealtimeRun<typeof designAgent>(run?.id, { accessToken: run?.token, enabled: run !== null, onComplete })`. `onComplete(finished, error)` posts one `assistant` message to `ai-chat` — `finished.output?.summary` (fallback `"Design updated."`) or `"The design agent hit an error. Try again."` — then `setRun(null)`.
+  - `runActive = submitting || run !== null` gates everything: textarea `disabled`, submit button `disabled` + `Loader2` spinner, and the status strip's visibility.
+  - Status strip: a compact bar above the composer (`bg-elevated`, top border, green `bg-chat-user` ping dot) shown only while `runActive`; text is the latest validated `ai-status-feed` message (`useFeedMessages` + `isAiStatusMessage`), fallback `"Working…"`. Replaced the old header spinner.
+  - Chat bubbles: `user` → `bg-chat-user` + `text-black/85`; `assistant` → `bg-elevated` + `text-copy-secondary` (unchanged).
+  - Canvas updates: none in this component. `useLiveblocksFlow` in `Canvas` + `AiActivityPanel` already reflect the agent's node/edge/presence writes live.
+  - `app/globals.css`: `--accent-chat-user: #62c073` in `:root`, mapped to `--color-chat-user` in `@theme inline` (spec names the hex explicitly; kept it in the token system rather than hardcoding in the component).
+  - Scope limits honored: no backend/Trigger.dev changes, no graph fetch, no manual node/edge sync, no sidebar redesign, no theme outside the token file.
+- Verified: `npx tsc --noEmit`, `eslint components/editor/canvas/ai-panel.tsx`, and `npm run build` all pass. Runtime end-to-end still gated on `TRIGGER_SECRET_KEY` + `GEMINI_API_KEY` in `.env.local`.
+
+- Bugfix — "Received NaN for the `y` attribute" crash from AI design runs:
+  - Root cause: `actionSchema` uses `z.number().optional()` for `x`/`y`/`width`/`height`, and `z.number()` accepts `NaN`; `applyAction`'s `?? 0` / `!= null` guards don't catch `NaN`/`±Infinity`. A non-finite coordinate reached a node's `position`, so React Flow's `fitView` computed a `NaN` viewport transform and `<Background>` rendered `y={NaN}`, blanking the canvas subtree (the top-center `AiActivityPanel` unmounts with it — hence "no notes"). A blob autosaved with a poisoned node reproduced it on every open.
+  - `types/canvas.ts`: new exported `finiteNumber(n)` (finite `number` or `undefined`) and `sanitizeNodeGeometry(node)` (clamps non-finite `position`/`width`/`height`; returns the same ref when clean). `types/canvas.check.ts` covers both.
+  - `src/trigger/design-agent.ts`: `applyAction` + `firstPoint` route every model-supplied coordinate through `finiteNumber`, so `addNode`/`moveNode`/`resizeNode` can never write non-finite geometry. `getLiveblocks()` moved inside the `run` try so a misconfigured client surfaces as an `error` status instead of a silent failure.
+  - `components/editor/canvas/index.tsx`: `nodes` from `useLiveblocksFlow` is mapped through `sanitizeNodeGeometry` (memoised) before any consumer — the single choke point that also heals already-poisoned autosave blobs on the next debounced save.
+  - Verified: `npx tsc --noEmit`, `eslint`, `npx tsx types/canvas.check.ts`, `npm run build` all pass.
+
 ## In Progress
 
 - None.
@@ -216,8 +264,8 @@ Update this file whenever the current phase, active feature, or implementation s
 ## Next Up
 
 - Set `BLOB_READ_WRITE_TOKEN` in `.env.local` (Vercel Blob store token) so canvas autosave/load actually persists at runtime.
+- Set `TRIGGER_SECRET_KEY` in `.env.local` so `POST /api/ai/design` and `/api/ai/design/token` work at runtime. `GEMINI_API_KEY` is also required by the design task (spec says it's already set).
 - Fill in `Storage` in `liveblocks.config.ts` when a typed `useStorage`/`useMutation` surface is needed (canvas autosave persists via the `/api/projects/[projectId]/canvas` route + Vercel Blob, not Liveblocks Storage).
-- Wire the AI-chat `<aside>` in `workspace-shell.tsx` (still an inert placeholder).
 - Collaborator email vs. Clerk primary email is matched case-insensitively only because invites are stored lowercased; `getAccessibleProject` still compares `c.email === identity.email` exactly. Fine while Clerk hands back lowercased primary emails, but normalise both sides if that ever changes.
 
 ## Open Questions

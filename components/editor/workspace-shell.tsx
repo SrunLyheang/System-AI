@@ -10,7 +10,8 @@ import {
   Sparkles,
 } from "lucide-react";
 
-import { CanvasRoom } from "@/components/editor/canvas";
+import { CanvasRoom, EditorRoom } from "@/components/editor/canvas";
+import { AiChatPanel } from "@/components/editor/canvas/ai-panel";
 import {
   CanvasSaveProvider,
   useCanvasSave,
@@ -124,28 +125,20 @@ function WorkspaceShell({
         onDeleteProject={actions.openDelete}
       />
 
-      <div className="flex flex-1 overflow-hidden">
-        <main className="relative flex-1 bg-background">
-          <CanvasRoom
-            roomId={project.id}
-            templatesOpen={isTemplatesOpen}
-            onTemplatesOpenChange={setIsTemplatesOpen}
-            onReady={() => setReadyProjectId(project.id)}
-          />
-        </main>
+      <EditorRoom roomId={project.id}>
+        <div className="flex flex-1 overflow-hidden">
+          <main className="relative flex-1 bg-background">
+            <CanvasRoom
+              roomId={project.id}
+              templatesOpen={isTemplatesOpen}
+              onTemplatesOpenChange={setIsTemplatesOpen}
+              onReady={() => setReadyProjectId(project.id)}
+            />
+          </main>
 
-        {isAiSidebarOpen ? (
-          <aside className="flex w-80 shrink-0 flex-col border-l border-surface-border bg-surface">
-            <div className="flex items-center gap-2 border-b border-surface-border-subtle px-4 py-3">
-              <Sparkles className="h-4 w-4 text-ai-text" />
-              <h2 className="text-sm font-medium text-copy-primary">AI chat</h2>
-            </div>
-            <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-copy-muted">
-              AI chat is coming soon.
-            </div>
-          </aside>
-        ) : null}
-      </div>
+          {isAiSidebarOpen ? <AiChatPanel /> : null}
+        </div>
+      </EditorRoom>
 
       <ProjectDialogs actions={actions} />
       <ShareDialog
