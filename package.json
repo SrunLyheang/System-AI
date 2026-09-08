@@ -4,11 +4,14 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "trigger:dev": "trigger dev",
+    "trigger:deploy": "trigger deploy",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
   },
   "dependencies": {
+    "@ai-sdk/google": "^4.0.64",
     "@base-ui/react": "^1.7.0",
     "@clerk/nextjs": "^7.8.0",
     "@clerk/ui": "^1.30.6",
@@ -18,8 +21,11 @@
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.1",
     "@prisma/extension-accelerate": "^3.0.1",
+    "@trigger.dev/react-hooks": "^4.5.16",
+    "@trigger.dev/sdk": "^4.5.16",
     "@vercel/blob": "^2.8.0",
     "@xyflow/react": "^12.11.6",
+    "ai": "^7.0.93",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dotenv": "^17.4.2",
@@ -34,6 +40,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@trigger.dev/build": "^4.5.16",
     "@types/node": "^20",
     "@types/pg": "^8.23.1",
     "@types/react": "^19",

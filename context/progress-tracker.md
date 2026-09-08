@@ -4,13 +4,14 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Phase
 
+- Design agent API (`context/feature-specs/22-design-agent-api.md`) — Trigger.dev backend wiring for design generation: `POST /api/ai/design` triggers the task + records a `TaskRun`, `POST /api/ai/design/token` returns a run-scoped realtime token, minimal `src/trigger/design-agent.ts` echoes its payload. No AI logic yet — done
 - Canvas autosave (`context/feature-specs/21-canvas-autosave.md`) — debounced persistence of canvas JSON to Vercel Blob + blob URL on the Prisma project record, with load-on-open and a Save status indicator — done
 - Presence (`context/feature-specs/19-presence-avatar-cursor.md`) — participant avatar group + live cursors inside the editor canvas view — done
 - Starter templates (`context/feature-specs/18-starter-template.md`) — importable pre-built canvases with card previews, replaces canvas contents through the synced node/edge state — done
 
 ## Current Goal
 
-- Add canvas interactions (custom node/edge rendering, controls, persistence), then AI chat.
+- Canvas interactions done. AI design generation: backend task wiring in place (spec 22); next is AI logic in the task (read canvas, generate nodes/edges, write back) and the client subscribe/trigger UI.
 
 ## Completed
 
@@ -209,6 +210,16 @@ Update this file whenever the current phase, active feature, or implementation s
   - Deviation from the grilled plan: no `.check.ts` for `measureLineWidth` — it is DOM-bound (`getComputedStyle`, `document`) and there is no jsdom in the project; mocking the DOM for a font-measurement heuristic wasn't worth it.
   - Verified: `tsc --noEmit`, `eslint --max-warnings=0` on the new module + hooks, `use-canvas-persistence.check`, `npm run build` all pass. Manual canvas smoke pass (marquee, keyboard delete, shape drop, template import, presence) still pending.
 
+- Design agent API (`context/feature-specs/22-design-agent-api.md`) — backend task wiring only, no AI, no canvas writes, no UI:
+  - `prisma/models/task-run.prisma` (new): `TaskRun` model — `runId` (`@id`, so unique + indexed; spec's "unique" + "index on runId" both satisfied by the PK, no separate `id`), `projectId`, `userId`, `createdAt @default(now())`, `@@index([userId, projectId])`. Migration `20260908110232_task_run` applied; `prisma generate` re-run.
+  - `lib/task-runs.ts` (new): `createTaskRun(runId, projectId, userId)` + `findTaskRun(runId)` — thin Prisma wrappers, same pattern as `lib/projects.ts`.
+  - `src/trigger/design-agent.ts` (new): `designAgent` `schemaTask` (`id: "design-agent"`, `maxDuration: 300`, zod `{ prompt, roomId }`) — logs and echoes the payload (`{ received }`). Reuses the existing `src/trigger` setup (`trigger.config.ts` `dirs: ["./src/trigger"]`, `@trigger.dev/sdk` `^4.5.16`, `zod` `^4.4.3` already installed). `src/trigger/example.ts` scaffold left as-is.
+  - `app/api/ai/design/route.ts` (new): `POST` — `getCurrentIdentity()` → 401; body `{ prompt, roomId, projectId }` all non-empty strings else 400; `getAccessibleProject(projectId, identity)` → 404 (owner or accepted collaborator); `tasks.trigger<typeof designAgent>("design-agent", { prompt, roomId })` (type-only import of the task, per the trigger-tasks skill — no task instance in the Next bundle); `createTaskRun(handle.id, projectId, userId)`; returns `{ runId }`.
+  - `app/api/ai/design/token/route.ts` (new): `POST` — `getAuthenticatedUserId()` → 401; body `{ runId }` non-empty string else 400; `findTaskRun(runId)` → 404 when missing or `run.userId !== userId`; `auth.createPublicToken({ scopes: { read: { runs: [runId] } } })`; returns `{ token }`. `/api/(.*)` already bypasses the proxy `auth.protect()`.
+  - Env: `TRIGGER_SECRET_KEY` (already in `.env.example`) must be set in `.env.local` before `tasks.trigger` / `auth.createPublicToken` work at runtime — not set yet (same pattern as `LIVEBLOCKS_SECRET_KEY` / `BLOB_READ_WRITE_TOKEN`).
+  - Scope limits honored: no node/edge generation, no AI provider calls, no canvas updates.
+- Verified: `prisma migrate dev`, `npm run build` (TypeScript incl.), and `eslint app/api/ai lib/task-runs.ts src/trigger/design-agent.ts --max-warnings=0` all pass; `/api/ai/design` and `/api/ai/design/token` appear as `ƒ` in the route table.
+
 ## In Progress
 
 - None.
@@ -216,6 +227,8 @@ Update this file whenever the current phase, active feature, or implementation s
 ## Next Up
 
 - Set `BLOB_READ_WRITE_TOKEN` in `.env.local` (Vercel Blob store token) so canvas autosave/load actually persists at runtime.
+- Set `TRIGGER_SECRET_KEY` in `.env.local` so `POST /api/ai/design` and `/api/ai/design/token` work at runtime.
+- Add the AI logic to `src/trigger/design-agent.ts` (read canvas, call an AI provider, generate nodes/edges, write them back) and the client subscribe/trigger UI using the run-scoped token.
 - Fill in `Storage` in `liveblocks.config.ts` when a typed `useStorage`/`useMutation` surface is needed (canvas autosave persists via the `/api/projects/[projectId]/canvas` route + Vercel Blob, not Liveblocks Storage).
 - Wire the AI-chat `<aside>` in `workspace-shell.tsx` (still an inert placeholder).
 - Collaborator email vs. Clerk primary email is matched case-insensitively only because invites are stored lowercased; `getAccessibleProject` still compares `c.email === identity.email` exactly. Fine while Clerk hands back lowercased primary emails, but normalise both sides if that ever changes.
