@@ -70,18 +70,42 @@ where per-user / per-plan authorization and any paired DB writes live.
 
 ```ts app/actions.ts
 "use server";
-import { auth } from "@trigger.dev/sdk";
+import { auth as triggerAuth } from "@trigger.dev/sdk";
 import { chat } from "@trigger.dev/sdk/ai";
+import { auth as clerkAuth } from "@clerk/nextjs/server";
+import { findChatById } from "@/lib/chats";
 
-// Creates the Session + first run, returns a session PAT. Idempotent on (env, chatId).
-export const startChatSession = chat.createStartSessionAction("my-chat");
+const createStartChatSession = chat.createStartSessionAction("my-chat");
+
+async function requireChatAccess(chatId: string) {
+  const { userId, orgId } = await clerkAuth();
+  if (!userId || !orgId) throw new Error("Unauthorized");
+
+  const chatRecord = await findChatById(chatId);
+  if (
+    !chatRecord ||
+    chatRecord.tenantId !== orgId ||
+    chatRecord.ownerId !== userId
+  ) {
+    throw new Error("Forbidden");
+  }
+}
 
 // Pure mint. The transport calls this on 401/403 to refresh an expired token.
 export async function mintChatAccessToken(chatId: string) {
-  return auth.createPublicToken({
+  await requireChatAccess(chatId);
+  return triggerAuth.createPublicToken({
     scopes: { read: { sessions: chatId }, write: { sessions: chatId } },
     expirationTime: "1h",
   });
+}
+
+// Creates the Session + first run only after the same tenant/owner check.
+export async function startChatSession(
+  args: Parameters<typeof createStartChatSession>[0],
+) {
+  await requireChatAccess(args.chatId);
+  return createStartChatSession(args);
 }
 ```
 
@@ -99,7 +123,8 @@ export function Chat() {
   const transport = useTriggerChatTransport<typeof myChat>({
     task: "my-chat", // typeof myChat gives compile-time task-id validation
     accessToken: ({ chatId }) => mintChatAccessToken(chatId),
-    startSession: ({ chatId, clientData }) => startChatSession({ chatId, clientData }),
+    startSession: ({ chatId, clientData }) =>
+      startChatSession({ chatId, clientData }),
   });
 
   const { messages, sendMessage, stop, status } = useChat({ transport });
@@ -183,7 +208,12 @@ stream them without persisting. Writes via `chat.stream` are always ephemeral.
 chat.response.write({ type: "data-context", data: { searchResults } });
 
 // In a hook via writer - streams but does NOT persist
-writer.write({ type: "data-progress", id: "search", data: { percent: 50 }, transient: true });
+writer.write({
+  type: "data-progress",
+  id: "search",
+  data: { percent: 50 },
+  transient: true,
+});
 ```
 
 ### 4. Custom UIMessage type, client data, and builder hooks
@@ -204,7 +234,12 @@ export const myChat = chat
       writer.write({ type: "data-turn-status", data: { status: "preparing" } });
     },
     run: async ({ messages, tools, signal }) =>
-      streamText({ ...chat.toStreamTextOptions({ tools }), model, messages, abortSignal: signal }),
+      streamText({
+        ...chat.toStreamTextOptions({ tools }),
+        model,
+        messages,
+        abortSignal: signal,
+      }),
   });
 ```
 
@@ -234,7 +269,13 @@ server-side.
 
 ```ts
 run: async ({ messages, signal }) =>
-  streamText({ ...chat.toStreamTextOptions(), model, messages, abortSignal: signal, stopWhen: stepCountIs(15) });
+  streamText({
+    ...chat.toStreamTextOptions(),
+    model,
+    messages,
+    abortSignal: signal,
+    stopWhen: stepCountIs(15),
+  });
 ```
 
 ### 6. Migrating from a plain AI SDK `streamText` route
@@ -249,12 +290,19 @@ There is no API route in this model. The transport replaces the route round-trip
 ## Common mistakes
 
 - **CRITICAL: forgetting `...chat.toStreamTextOptions()`.**
+
   ```ts
   // Wrong - compaction / steering / background injection silently no-op
   return streamText({ model, messages, abortSignal: signal });
   // Correct - spread FIRST so explicit overrides win
-  return streamText({ ...chat.toStreamTextOptions(), model, messages, abortSignal: signal });
+  return streamText({
+    ...chat.toStreamTextOptions(),
+    model,
+    messages,
+    abortSignal: signal,
+  });
   ```
+
   It wires the `prepareStep` callback behind compaction, mid-turn steering, and background
   injection, injects the system prompt from `chat.prompt()`, resolves the registry model, and adds
   telemetry. Omitting it makes all of those silently no-op with no error.

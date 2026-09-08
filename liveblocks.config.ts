@@ -1,5 +1,7 @@
 // Define Liveblocks types for your application
 // https://liveblocks.io/docs/api-reference/liveblocks-react#Typing-your-data
+import type { AiActivity } from "./types/canvas";
+
 declare global {
   interface Liveblocks {
     // Each user's Presence, for useMyPresence, useOthers, etc.
@@ -11,8 +13,11 @@ declare global {
     };
 
     // The Storage tree for the room, for useMutation, useStorage, etc.
-    // Populated when the React Flow canvas lands (next feature unit).
-    Storage: Record<string, never>;
+    // `useLiveblocksFlow` owns its own `flow` subtree (typed internally). `ai`
+    // holds the design agent's shared presence + progress.
+    Storage: {
+      ai?: AiActivity;
+    };
 
     // Custom user info set when authenticating with a secret key
     UserMeta: {

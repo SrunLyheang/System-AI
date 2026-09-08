@@ -37,7 +37,7 @@ This unit handles triggering background jobs, tracking runs, and issuing tokens.
 
 4. Create the design task.
 
-   Create `trigger/design-agent.ts`
+   Create `src/trigger/design-agent.ts`
    - check the existing Trigger.dev setup and installed agent features first
    - reuse the existing setup instead of creating a new pattern
    - export a minimal design task

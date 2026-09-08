@@ -4,6 +4,7 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Phase
 
+- Design agent logic (`context/feature-specs/23-design-agent-logic.md`) — `src/trigger/design-agent.ts` now interprets the prompt with Gemini (`@ai-sdk/google` + `ai` `generateObject`) and writes real node/edge changes into the shared Liveblocks room via `mutateFlow` from `@liveblocks/react-flow/node`, plus a shared `ai` Storage object for agent presence + status that `AiActivityPanel` renders for every participant — done
 - Design agent API (`context/feature-specs/22-design-agent-api.md`) — Trigger.dev backend wiring for design generation: `POST /api/ai/design` triggers the task + records a `TaskRun`, `POST /api/ai/design/token` returns a run-scoped realtime token, minimal `src/trigger/design-agent.ts` echoes its payload. No AI logic yet — done
 - Canvas autosave (`context/feature-specs/21-canvas-autosave.md`) — debounced persistence of canvas JSON to Vercel Blob + blob URL on the Prisma project record, with load-on-open and a Save status indicator — done
 - Presence (`context/feature-specs/19-presence-avatar-cursor.md`) — participant avatar group + live cursors inside the editor canvas view — done
@@ -11,7 +12,7 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
-- Canvas interactions done. AI design generation: backend task wiring in place (spec 22); next is AI logic in the task (read canvas, generate nodes/edges, write back) and the client subscribe/trigger UI.
+- Canvas interactions done. AI design generation: task now reads the canvas, calls Gemini, and writes nodes/edges + agent presence/status back through Liveblocks (spec 23). Remaining: a client trigger UI (prompt box → `POST /api/ai/design` → subscribe with the run-scoped token) and wiring the AI-chat `<aside>`.
 
 ## Completed
 
@@ -214,11 +215,26 @@ Update this file whenever the current phase, active feature, or implementation s
   - `prisma/models/task-run.prisma` (new): `TaskRun` model — `runId` (`@id`, so unique + indexed; spec's "unique" + "index on runId" both satisfied by the PK, no separate `id`), `projectId`, `userId`, `createdAt @default(now())`, `@@index([userId, projectId])`. Migration `20260908110232_task_run` applied; `prisma generate` re-run.
   - `lib/task-runs.ts` (new): `createTaskRun(runId, projectId, userId)` + `findTaskRun(runId)` — thin Prisma wrappers, same pattern as `lib/projects.ts`.
   - `src/trigger/design-agent.ts` (new): `designAgent` `schemaTask` (`id: "design-agent"`, `maxDuration: 300`, zod `{ prompt, roomId }`) — logs and echoes the payload (`{ received }`). Reuses the existing `src/trigger` setup (`trigger.config.ts` `dirs: ["./src/trigger"]`, `@trigger.dev/sdk` `^4.5.16`, `zod` `^4.4.3` already installed). `src/trigger/example.ts` scaffold left as-is.
-  - `app/api/ai/design/route.ts` (new): `POST` — `getCurrentIdentity()` → 401; body `{ prompt, roomId, projectId }` all non-empty strings else 400; `getAccessibleProject(projectId, identity)` → 404 (owner or accepted collaborator); `tasks.trigger<typeof designAgent>("design-agent", { prompt, roomId })` (type-only import of the task, per the trigger-tasks skill — no task instance in the Next bundle); `createTaskRun(handle.id, projectId, userId)`; returns `{ runId }`.
+  - `app/api/ai/design/route.ts` (new): `POST` — `getCurrentIdentity()` → 401; body `{ prompt, roomId, projectId }` all non-empty strings else 400; `getAccessibleProject(projectId, identity)` → 404 (owner or accepted collaborator); triggers with a stable 24-hour idempotency key, records `TaskRun`, and retries remote cancellation before returning 500 if persistence fails; returns `{ runId }`.
   - `app/api/ai/design/token/route.ts` (new): `POST` — `getAuthenticatedUserId()` → 401; body `{ runId }` non-empty string else 400; `findTaskRun(runId)` → 404 when missing or `run.userId !== userId`; `auth.createPublicToken({ scopes: { read: { runs: [runId] } } })`; returns `{ token }`. `/api/(.*)` already bypasses the proxy `auth.protect()`.
   - Env: `TRIGGER_SECRET_KEY` (already in `.env.example`) must be set in `.env.local` before `tasks.trigger` / `auth.createPublicToken` work at runtime — not set yet (same pattern as `LIVEBLOCKS_SECRET_KEY` / `BLOB_READ_WRITE_TOKEN`).
   - Scope limits honored: no node/edge generation, no AI provider calls, no canvas updates.
 - Verified: `prisma migrate dev`, `npm run build` (TypeScript incl.), and `eslint app/api/ai lib/task-runs.ts src/trigger/design-agent.ts --max-warnings=0` all pass; `/api/ai/design` and `/api/ai/design/token` appear as `ƒ` in the route table.
+
+- Design agent logic (`context/feature-specs/23-design-agent-logic.md`):
+  - `types/canvas.ts`: added `NODE_SHAPES` (readonly tuple — `CanvasNodeShape` now derives from it; ui-context.md already referenced it), plus `AI_STORAGE_KEY = "ai"` and the `AiActivity` type (`status`/`message`/`cursor`/`updatedAt`) — a plain JSON object (`type`, not `interface`, so it satisfies Liveblocks' Lson check), replaced whole on every write.
+  - `liveblocks.config.ts`: `Storage` went from `Record<string, never>` to `{ ai?: AiActivity }`. `useLiveblocksFlow` still owns its own `flow` subtree (internal casts), unaffected by the added optional key.
+  - `src/trigger/design-agent.ts` (rewritten from the echo stub): validates `{ prompt, roomId }`, then in one `run`:
+    1. `setActivity(roomId, { status: "thinking", … })` — writes the shared `ai` Storage object via `getLiveblocks().mutateStorage(roomId, ({ root }) => root.set("ai", next))`.
+    2. Snapshots current nodes/edges with `mutateFlow` (`@liveblocks/react-flow/node`, the backend counterpart to `useLiveblocksFlow`).
+    3. `generateObject` (`ai`) with `createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY })("gemini-2.0-flash")` and a flat `actionSchema` (zod) — one `type` enum (`addNode`/`moveNode`/`resizeNode`/`updateNode`/`deleteNode`/`addEdge`/`deleteEdge`) plus optional fields; system prompt embeds the current graph, the 6 allowed shapes, the 8-entry palette (model picks `colorIndex`, never raw hex), and grid/spacing rules.
+    4. `setActivity({ status: "generating", cursor: <first placed node> })`, then a second `mutateFlow` applies every action (`applyAction` skips actions missing required fields so a partial plan still yields a valid canvas).
+    5. `setActivity({ status: "done", message: plan.summary, cursor: null })`.
+    - Errors: caught, `setActivity({ status: "error", … })`, then `AbortTaskRunError` (structured-output/provider failures won't recover on blind retry) — the canvas is never left half-mutated by a throw mid-apply because apply is one `mutateFlow` call.
+  - `components/editor/canvas/presence.tsx`: new `AiActivityPanel` — a `<Panel position="top-center">` reading `useStorage(root => root.ai)`; pulsing dot + message while `thinking`/`generating`, `done`/`error` state fades after 5s (a `setTimeout` re-render). Rendered in `canvas/index.tsx` next to `<PresencePanel />`.
+  - `.env.example`: added `GEMINI_API_KEY=` (spec says it's already in `.env.local`).
+  - Not in scope (still `Next Up`): the client prompt box / trigger button and run subscription — spec 23's Implementation section is only the task. Without a trigger UI the flow can't be exercised end-to-end yet beyond the build gate.
+- Verified: `npx tsc --noEmit`, `eslint` on the five touched files `--max-warnings=0`, and `npm run build` all pass.
 
 ## In Progress
 
@@ -227,8 +243,8 @@ Update this file whenever the current phase, active feature, or implementation s
 ## Next Up
 
 - Set `BLOB_READ_WRITE_TOKEN` in `.env.local` (Vercel Blob store token) so canvas autosave/load actually persists at runtime.
-- Set `TRIGGER_SECRET_KEY` in `.env.local` so `POST /api/ai/design` and `/api/ai/design/token` work at runtime.
-- Add the AI logic to `src/trigger/design-agent.ts` (read canvas, call an AI provider, generate nodes/edges, write them back) and the client subscribe/trigger UI using the run-scoped token.
+- Set `TRIGGER_SECRET_KEY` in `.env.local` so `POST /api/ai/design` and `/api/ai/design/token` work at runtime. `GEMINI_API_KEY` is also required by the design task (spec says it's already set).
+- Build the client subscribe/trigger UI: a prompt box (in the AI-chat `<aside>`) that `POST`s `/api/ai/design`, mints a token via `/api/ai/design/token`, and subscribes with `useRealtimeRun` from `@trigger.dev/react-hooks`. The task's canvas writes + `AiActivityPanel` already land live via Liveblocks; the run subscription is only for the trigger UI's own progress/errors.
 - Fill in `Storage` in `liveblocks.config.ts` when a typed `useStorage`/`useMutation` surface is needed (canvas autosave persists via the `/api/projects/[projectId]/canvas` route + Vercel Blob, not Liveblocks Storage).
 - Wire the AI-chat `<aside>` in `workspace-shell.tsx` (still an inert placeholder).
 - Collaborator email vs. Clerk primary email is matched case-insensitively only because invites are stored lowercased; `getAccessibleProject` still compares `c.email === identity.email` exactly. Fine while Clerk hands back lowercased primary emails, but normalise both sides if that ever changes.

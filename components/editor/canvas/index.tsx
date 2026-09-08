@@ -40,7 +40,7 @@ import { useRegisterCanvasSave } from "./save-context";
 import { nodeTypes } from "./nodes";
 import { defaultEdgeOptions, edgeTypes } from "./edges";
 import { CanvasControls, ShapePanel } from "./panels";
-import { CanvasCursor, PresencePanel } from "./presence";
+import { AiActivityPanel, CanvasCursor, PresencePanel } from "./presence";
 
 import "@xyflow/react/dist/style.css";
 import "@liveblocks/react-flow/styles.css";
@@ -223,6 +223,7 @@ function Canvas({
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
         <Cursors components={{ Cursor: CanvasCursor }} />
         <PresencePanel />
+        <AiActivityPanel />
         <CanvasControls
           onUndo={undo}
           onRedo={redo}
