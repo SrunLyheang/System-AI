@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "trigger:dev": "trigger dev",
-    "trigger:deploy": "trigger deploy",
+    "trigger:dev": "npx trigger.dev@latest dev",
+    "trigger:deploy": "npx trigger.dev@latest deploy",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
