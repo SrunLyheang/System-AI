@@ -4,6 +4,7 @@ import {
   Component,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   type ReactNode,
 } from "react";
@@ -34,13 +35,17 @@ import { useMarqueeSelection } from "@/hooks/use-marquee-selection";
 import { useShapeDrop } from "@/hooks/use-shape-drop";
 import { useTemplateImport } from "@/hooks/use-template-import";
 import { StarterTemplatesModal } from "@/components/editor/starter-templates-modal";
-import type { CanvasEdge, CanvasNode } from "@/types/canvas";
+import {
+  sanitizeNodeGeometry,
+  type CanvasEdge,
+  type CanvasNode,
+} from "@/types/canvas";
 
 import { useRegisterCanvasSave } from "./save-context";
 import { nodeTypes } from "./nodes";
 import { defaultEdgeOptions, edgeTypes } from "./edges";
 import { CanvasControls, ShapePanel } from "./panels";
-import { CanvasCursor, PresencePanel } from "./presence";
+import { AiActivityPanel, CanvasCursor, PresencePanel } from "./presence";
 
 import "@xyflow/react/dist/style.css";
 import "@liveblocks/react-flow/styles.css";
@@ -54,7 +59,28 @@ interface CanvasRoomProps {
   onReady: () => void;
 }
 
-/** Sets up the Liveblocks room for a project and renders the collaborative canvas. */
+/** Sets up the Liveblocks room for a project. Wraps both the canvas and the AI
+ *  sidebar so they share one room connection, presence, and feeds. */
+function EditorRoom({
+  roomId,
+  children,
+}: {
+  roomId: string;
+  children: ReactNode;
+}) {
+  return (
+    <LiveblocksProvider authEndpoint="/api/liveblocks-auth">
+      <RoomProvider
+        id={roomId}
+        initialPresence={{ cursor: null, thinking: false }}
+      >
+        <CanvasErrorBoundary>{children}</CanvasErrorBoundary>
+      </RoomProvider>
+    </LiveblocksProvider>
+  );
+}
+
+/** Renders the collaborative canvas. Must be nested inside {@link EditorRoom}. */
 function CanvasRoom({
   roomId,
   templatesOpen,
@@ -62,27 +88,18 @@ function CanvasRoom({
   onReady,
 }: CanvasRoomProps) {
   return (
-    <LiveblocksProvider authEndpoint="/api/liveblocks-auth">
-      <RoomProvider
-        id={roomId}
-        initialPresence={{ cursor: null, thinking: false }}
-      >
-        <CanvasErrorBoundary>
-          <ClientSideSuspense
-            fallback={<CanvasMessage>Loading canvas…</CanvasMessage>}
-          >
-            <ReactFlowProvider>
-              <Canvas
-                roomId={roomId}
-                templatesOpen={templatesOpen}
-                onTemplatesOpenChange={onTemplatesOpenChange}
-                onReady={onReady}
-              />
-            </ReactFlowProvider>
-          </ClientSideSuspense>
-        </CanvasErrorBoundary>
-      </RoomProvider>
-    </LiveblocksProvider>
+    <ClientSideSuspense
+      fallback={<CanvasMessage>Loading canvas…</CanvasMessage>}
+    >
+      <ReactFlowProvider>
+        <Canvas
+          roomId={roomId}
+          templatesOpen={templatesOpen}
+          onTemplatesOpenChange={onTemplatesOpenChange}
+          onReady={onReady}
+        />
+      </ReactFlowProvider>
+    </ClientSideSuspense>
   );
 }
 
@@ -98,12 +115,20 @@ function Canvas({
   onTemplatesOpenChange: (open: boolean) => void;
   onReady: () => void;
 }) {
-  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, onDelete } =
-    useLiveblocksFlow<CanvasNode, CanvasEdge>({
-      suspense: true,
-      nodes: { initial: [] },
-      edges: { initial: [] },
-    });
+  const {
+    nodes: rawNodes,
+    edges,
+    onNodesChange,
+    onEdgesChange,
+    onConnect,
+    onDelete,
+  } = useLiveblocksFlow<CanvasNode, CanvasEdge>({
+    suspense: true,
+    nodes: { initial: [] },
+    edges: { initial: [] },
+  });
+  // Never let non-finite geometry reach React Flow — see sanitizeNodeGeometry.
+  const nodes = useMemo(() => rawNodes.map(sanitizeNodeGeometry), [rawNodes]);
   const reactFlow = useReactFlow<CanvasNode, CanvasEdge>();
   const undo = useUndo();
   const redo = useRedo();
@@ -223,6 +248,7 @@ function Canvas({
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
         <Cursors components={{ Cursor: CanvasCursor }} />
         <PresencePanel />
+        <AiActivityPanel />
         <CanvasControls
           onUndo={undo}
           onRedo={redo}
@@ -273,4 +299,4 @@ class CanvasErrorBoundary extends Component<
   }
 }
 
-export { CanvasRoom };
+export { CanvasRoom, EditorRoom };

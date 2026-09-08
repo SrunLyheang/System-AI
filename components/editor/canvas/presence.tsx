@@ -1,6 +1,9 @@
+import { useEffect, useState } from "react";
+
 import { Panel } from "@xyflow/react";
-import { useOther, useOthers } from "@liveblocks/react/suspense";
+import { useOther, useOthers, useStorage } from "@liveblocks/react/suspense";
 import { UserButton, useAuth } from "@clerk/nextjs";
+import { Loader2 } from "lucide-react";
 
 type PresenceUserInfo = Liveblocks["UserMeta"]["info"];
 
@@ -80,9 +83,48 @@ export function PresencePanel() {
   );
 }
 
+/** Top-center design-agent indicator. Reads the shared `ai` Storage object the
+ *  Trigger.dev task writes, so every participant sees the agent thinking,
+ *  applying changes, or its final summary. A `done`/`error` state fades after a
+ *  few seconds; `thinking`/`generating` pulse while the task runs. */
+export function AiActivityPanel() {
+  const ai = useStorage((root) => root.ai);
+  const [now, setNow] = useState(() => Date.now());
+
+  const settled = ai?.status === "done" || ai?.status === "error";
+  useEffect(() => {
+    if (!settled) return;
+    const t = setTimeout(() => setNow(Date.now()), 5000);
+    return () => clearTimeout(t);
+  }, [settled, ai?.updatedAt]);
+
+  if (!ai || ai.status === "idle") return null;
+  if (settled && now - ai.updatedAt > 5000) return null;
+
+  const active = ai.status === "thinking" || ai.status === "generating";
+  const dotColor =
+    ai.status === "error" ? "var(--state-error)" : "var(--accent-ai)";
+
+  return (
+    <Panel position="top-center">
+      <div className="flex items-center gap-2 rounded-full border border-surface-border bg-surface/90 px-3 py-1.5 shadow-lg backdrop-blur">
+        <span
+          className={`h-2 w-2 rounded-full ${active ? "animate-pulse" : ""}`}
+          style={{ background: dotColor }}
+        />
+        <span className="max-w-70 truncate text-[11px] font-medium text-copy-secondary">
+          {ai.message}
+        </span>
+      </div>
+    </Panel>
+  );
+}
+
 /** One live cursor for another participant, colored by their presence color. */
 export function CanvasCursor({ connectionId }: { connectionId: number }) {
   const info = useOther(connectionId, (user) => user.info);
+  // Set while that participant is waiting on an AI response.
+  const thinking = useOther(connectionId, (user) => user.presence.thinking);
   if (!info) return null;
   return (
     <div className="pointer-events-none flex items-start">
@@ -95,10 +137,11 @@ export function CanvasCursor({ connectionId }: { connectionId: number }) {
         />
       </svg>
       <span
-        className="ml-0.5 -mt-0.5 rounded-md px-1.5 py-0.5 text-[11px] font-medium leading-none text-white shadow-sm"
+        className="ml-0.5 -mt-0.5 flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium leading-none text-white shadow-sm"
         style={{ background: info.color }}
       >
         {info.name}
+        {thinking ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
       </span>
     </div>
   );

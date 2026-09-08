@@ -1,0 +1,11 @@
+/// Tracks a Trigger.dev run so the app can verify a caller owns it before
+/// handing back a run-scoped realtime token. `runId` is the Trigger.dev run id
+/// and doubles as the primary key (unique + indexed).
+model TaskRun {
+  runId     String   @id
+  projectId String
+  userId    String
+  createdAt DateTime @default(now())
+
+  @@index([userId, projectId])
+}
