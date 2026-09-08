@@ -1,9 +1,8 @@
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { AbortTaskRunError, logger, schemaTask } from "@trigger.dev/sdk";
 import { mutateFlow } from "@liveblocks/react-flow/node";
-import { generateText } from "ai";
 import { z } from "zod";
 
+import { generateChatText } from "@/lib/ai";
 import { getLiveblocks } from "@/lib/liveblocks";
 import {
   AI_STORAGE_KEY,
@@ -304,11 +303,7 @@ export const designAgent = schemaTask({
         message: "Designing a layout…",
       });
 
-      const google = createGoogleGenerativeAI({
-        apiKey: process.env.GEMINI_API_KEY,
-      });
-      const { text } = await generateText({
-        model: google("gemini-3.6-flash"),
+      const text = await generateChatText({
         system: systemPrompt(nodes, edges) + JSON_FORMAT_INSTRUCTIONS,
         prompt,
       });

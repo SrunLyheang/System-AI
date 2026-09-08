@@ -9,6 +9,7 @@ import {
   Share2,
   Sparkles,
 } from "lucide-react";
+import { ReactFlowProvider } from "@xyflow/react";
 
 import { CanvasRoom, EditorRoom } from "@/components/editor/canvas";
 import { AiChatPanel } from "@/components/editor/canvas/ai-panel";
@@ -77,12 +78,15 @@ function WorkspaceShell({
               <PanelLeftOpen className="h-4 w-4" />
             )}
           </Button>
+          <span
+            aria-hidden
+            className="h-1.5 w-1.5 shrink-0 rounded-full bg-ai shadow-[0_0_8px_var(--accent-ai)]"
+          />
           <span className="truncate text-sm font-medium text-copy-primary">
             {project.name}
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <SaveButton />
           <Button
             variant="outline"
             size="sm"
@@ -102,11 +106,18 @@ function WorkspaceShell({
             <Share2 className="h-4 w-4" />
             Share
           </Button>
+          <span aria-hidden className="mx-0.5 h-5 w-px bg-surface-border-subtle" />
+          <SaveButton />
           <Button
-            variant={isAiSidebarOpen ? "secondary" : "outline"}
+            variant="outline"
             size="icon-sm"
             onClick={() => setIsAiSidebarOpen((open) => !open)}
             aria-label={isAiSidebarOpen ? "Hide AI panel" : "Show AI panel"}
+            className={
+              isAiSidebarOpen
+                ? "border-ai/40 bg-ai/15 text-ai-text hover:bg-ai/20 hover:text-ai-text"
+                : "text-ai-text hover:text-ai-text"
+            }
           >
             <Sparkles className="h-4 w-4" />
           </Button>
@@ -126,18 +137,22 @@ function WorkspaceShell({
       />
 
       <EditorRoom roomId={project.id}>
-        <div className="flex flex-1 overflow-hidden">
-          <main className="relative flex-1 bg-background">
-            <CanvasRoom
-              roomId={project.id}
-              templatesOpen={isTemplatesOpen}
-              onTemplatesOpenChange={setIsTemplatesOpen}
-              onReady={() => setReadyProjectId(project.id)}
-            />
-          </main>
+        {/* One provider around canvas + sidebar so the AI panel's
+            `useReactFlow` shares the canvas store. */}
+        <ReactFlowProvider>
+          <div className="flex flex-1 overflow-hidden">
+            <main className="relative flex-1 bg-background">
+              <CanvasRoom
+                roomId={project.id}
+                templatesOpen={isTemplatesOpen}
+                onTemplatesOpenChange={setIsTemplatesOpen}
+                onReady={() => setReadyProjectId(project.id)}
+              />
+            </main>
 
-          {isAiSidebarOpen ? <AiChatPanel /> : null}
-        </div>
+            {isAiSidebarOpen ? <AiChatPanel /> : null}
+          </div>
+        </ReactFlowProvider>
       </EditorRoom>
 
       <ProjectDialogs actions={actions} />
@@ -186,8 +201,19 @@ function SaveButton() {
       size="sm"
       onClick={() => save()}
       disabled={status === "saving"}
+      className="w-19 justify-center"
     >
-      {label}
+      <span
+        className={
+          flash === "saved"
+            ? "text-success"
+            : flash === "error"
+              ? "text-error"
+              : undefined
+        }
+      >
+        {label}
+      </span>
     </Button>
   );
 }

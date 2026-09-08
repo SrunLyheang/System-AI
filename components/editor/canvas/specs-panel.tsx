@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Download, FileText, Loader2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
@@ -41,17 +41,45 @@ function downloadSpec(projectId: string, specId: string) {
   link.remove();
 }
 
+interface SpecsPanelProps {
+  projectId: string;
+  onGenerateSpec?: () => Promise<void>;
+  isGenerating?: boolean;
+  onSpecGenerated?: () => void;
+}
+
 /** Specs tab of the AI sidebar. Lists the generated specs for the current
  *  project, opens a Markdown preview in a modal, and downloads any spec. Spec
  *  content is never held in long-lived state — it's fetched when a preview
- *  opens and dropped when it closes. */
-export function SpecsPanel({ projectId }: { projectId: string }) {
+ *  opens and dropped when it closes. A "Generate Spec" button triggers spec
+ *  generation from the current canvas and chat history. */
+export function SpecsPanel({
+  projectId,
+  onGenerateSpec,
+  isGenerating = false,
+  onSpecGenerated,
+}: SpecsPanelProps) {
   const [specs, setSpecs] = useState<SpecMeta[] | null>(null);
   const [listError, setListError] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const [selected, setSelected] = useState<SpecMeta | null>(null);
   const [content, setContent] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState(false);
+
+  const wasGeneratingRef = useRef(false);
+
+  // Auto-refresh specs list when generation completes
+  useEffect(() => {
+    if (wasGeneratingRef.current && !isGenerating && specs !== null) {
+      // Generation just completed, refresh the list
+      setRefreshKey((k) => k + 1);
+      onSpecGenerated?.();
+      wasGeneratingRef.current = false;
+    } else if (isGenerating) {
+      wasGeneratingRef.current = true;
+    }
+  }, [isGenerating, onSpecGenerated, specs]);
 
   useEffect(() => {
     let cancelled = false;
@@ -69,7 +97,7 @@ export function SpecsPanel({ projectId }: { projectId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [projectId, refreshKey]);
 
   // `selected` only ever goes null → spec → null (the list sits behind the
   // modal), so `content`/`previewError` are already reset by the close handler
@@ -95,6 +123,25 @@ export function SpecsPanel({ projectId }: { projectId: string }) {
 
   return (
     <>
+      {onGenerateSpec && (
+        <div className="border-b border-surface-border-subtle px-4 py-3">
+          <Button
+            onClick={() => void onGenerateSpec()}
+            disabled={isGenerating}
+            className="w-full"
+            size="sm"
+          >
+            {isGenerating ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Generating…
+              </>
+            ) : (
+              "Generate Spec"
+            )}
+          </Button>
+        </div>
+      )}
       <div className="flex flex-1 flex-col overflow-y-auto px-4 py-3 text-sm">
         {specs === null && !listError ? (
           <p className="my-auto flex items-center justify-center gap-2 text-copy-muted">
@@ -102,7 +149,7 @@ export function SpecsPanel({ projectId }: { projectId: string }) {
           </p>
         ) : listError ? (
           <p className="my-auto text-center text-copy-muted">
-            Couldn’t load specs. Try reopening the panel.
+            Couldn&apos;t load specs. Try reopening the panel.
           </p>
         ) : specs && specs.length === 0 ? (
           <p className="my-auto text-center text-copy-muted">
@@ -173,7 +220,7 @@ export function SpecsPanel({ projectId }: { projectId: string }) {
           </DialogHeader>
           <div className="min-h-0 flex-1 overflow-y-auto">
             {previewError ? (
-              <p className="text-copy-muted">Couldn’t load this spec.</p>
+              <p className="text-copy-muted">Couldn&apos;t load this spec.</p>
             ) : content === null ? (
               <p className="flex items-center gap-2 text-copy-muted">
                 <Loader2 className="h-4 w-4 animate-spin" /> Loading…

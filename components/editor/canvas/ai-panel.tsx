@@ -9,6 +9,7 @@ import {
   useRoom,
   useSelf,
 } from "@liveblocks/react";
+import { useReactFlow } from "@xyflow/react";
 import { useRealtimeRun } from "@trigger.dev/react-hooks";
 import { ArrowUp, Loader2, Sparkles } from "lucide-react";
 
@@ -24,6 +25,7 @@ import {
   type AiStatusMessage,
 } from "@/types/tasks";
 import type { designAgent } from "@/src/trigger/design-agent";
+import type { CanvasNode, CanvasEdge } from "@/types/canvas";
 
 function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], {
@@ -45,15 +47,30 @@ export function AiChatPanel() {
   const createFeed = useCreateFeed();
   const createFeedMessage = useCreateFeedMessage();
   const self = useSelf();
+  const reactFlow = useReactFlow<CanvasNode, CanvasEdge>();
 
   const [draft, setDraft] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [run, setRun] = useState<{ id: string; token: string } | null>(null);
+  // Set true when a run's realtime completion hasn't arrived within the timeout
+  // below — a dropped subscription or a `trigger dev` restart can strand `run`.
+  // The subscription stays live so a late `onComplete` still posts; this only
+  // stops the composer from being locked forever.
+  const [runTimedOut, setRunTimedOut] = useState(false);
+  const [specRun, setSpecRun] = useState<{ id: string; token: string } | null>(null);
+  const [specSubmitting, setSpecSubmitting] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // A run is "active" from the moment we submit until `useRealtimeRun` reports
-  // completion. Gates the composer and shows the status strip.
-  const runActive = submitting || run !== null;
+  // completion — unless it timed out, at which point we let the user carry on.
+  const runActive = (submitting || run !== null) && !runTimedOut;
+
+  // Stop blocking the composer if a completion event never lands.
+  useEffect(() => {
+    if (run === null) return;
+    const timer = setTimeout(() => setRunTimedOut(true), 120_000);
+    return () => clearTimeout(timer);
+  }, [run]);
 
   // Feeds are created lazily; make sure `ai-chat` exists before anyone posts.
   // Swallows the "already exists" rejection on every mount after the first.
@@ -98,6 +115,26 @@ export function AiChatPanel() {
         timestamp: Date.now(),
       } satisfies AiChatMessage).catch(() => {});
       setRun(null);
+      setRunTimedOut(false);
+    },
+  });
+
+  // Track spec generation run separately from design run
+  useRealtimeRun<typeof designAgent>(specRun?.id, {
+    accessToken: specRun?.token,
+    enabled: specRun !== null,
+    onComplete: (finished, error) => {
+      const content = error
+        ? "The spec agent hit an error. Try again."
+        : "Spec generated successfully.";
+      void createFeedMessage(AI_CHAT_FEED_ID, {
+        sender: "Spec agent",
+        role: "assistant",
+        content,
+        timestamp: Date.now(),
+      } satisfies AiChatMessage).catch(() => {});
+      setSpecRun(null);
+      setSpecSubmitting(false);
     },
   });
 
@@ -105,10 +142,71 @@ export function AiChatPanel() {
     await createFeedMessage(AI_CHAT_FEED_ID, message).catch(() => {});
   }
 
+  async function generateSpec() {
+    if (specSubmitting || specRun) return;
+    setSpecSubmitting(true);
+    try {
+      // eslint-disable-next-line react-hooks/purity
+      const timestamp = Date.now();
+      const nodes = reactFlow.getNodes();
+      const edges = reactFlow.getEdges();
+
+      // Build chat history from the feed, oldest first
+      const chatHistory = chat.map((msg) => ({
+        role: msg.role,
+        content: msg.content,
+      }));
+
+      await postChat({
+        sender: "You",
+        role: "user",
+        content: "Generate a technical specification",
+        timestamp,
+      });
+
+      const res = await fetch("/api/ai/spec", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          roomId: room.id,
+          projectId: room.id,
+          nodes,
+          edges,
+          chatHistory,
+        }),
+      });
+      if (!res.ok) throw new Error(`spec request failed: ${res.status}`);
+      const { runId } = (await res.json()) as { runId: string };
+
+      const tokenRes = await fetch("/api/ai/spec/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runId }),
+      });
+      if (!tokenRes.ok) {
+        throw new Error(`token request failed: ${tokenRes.status}`);
+      }
+      const { token } = (await tokenRes.json()) as { token: string };
+
+      setSpecRun({ id: runId, token });
+    } catch {
+      // eslint-disable-next-line react-hooks/purity
+      const errorTimestamp = Date.now();
+      await postChat({
+        sender: "Spec agent",
+        role: "assistant",
+        content: "Couldn't start the spec generator. Try again.",
+        timestamp: errorTimestamp,
+      } satisfies AiChatMessage);
+      setSpecSubmitting(false);
+    }
+  }
+
   async function submit() {
     const prompt = draft.trim();
     if (prompt === "" || runActive) return;
     setSubmitting(true);
+    setRunTimedOut(false);
     try {
       await postChat({
         sender: self?.info.name ?? "Anonymous",
@@ -127,7 +225,12 @@ export function AiChatPanel() {
           projectId: room.id,
         }),
       });
-      if (!res.ok) throw new Error(`design request failed: ${res.status}`);
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        throw new Error(body?.error ?? `design request failed: ${res.status}`);
+      }
       const { runId } = (await res.json()) as { runId: string };
 
       const tokenRes = await fetch("/api/ai/design/token", {
@@ -141,11 +244,14 @@ export function AiChatPanel() {
       const { token } = (await tokenRes.json()) as { token: string };
 
       setRun({ id: runId, token });
-    } catch {
+    } catch (error) {
       await postChat({
         sender: "Design agent",
         role: "assistant",
-        content: "Couldn’t start the design agent. Try again.",
+        content:
+          error instanceof Error
+            ? error.message
+            : "Couldn’t start the design agent. Try again.",
         timestamp: Date.now(),
       });
     } finally {
@@ -172,14 +278,25 @@ export function AiChatPanel() {
             className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-3 text-sm"
           >
             {chat.length === 0 ? (
-              <p className="my-auto text-center text-copy-muted">
-                Describe a change and the design agent will update the canvas.
-              </p>
+              <div className="my-auto flex flex-col items-center gap-3 px-6 text-center">
+                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-ai/10 text-ai-text">
+                  <Sparkles className="h-6 w-6" />
+                </span>
+                <p className="text-sm text-copy-muted">
+                  Describe a change and the design agent will update the canvas.
+                </p>
+              </div>
             ) : (
               chat.map((m) => (
-                <div key={m.id} className="flex flex-col gap-0.5">
+                <div key={m.id} className="flex flex-col gap-1">
                   <div className="flex items-baseline gap-2">
-                    <span className="text-xs font-medium text-copy-primary">
+                    <span
+                      className={
+                        m.role === "user"
+                          ? "text-xs font-medium text-copy-primary"
+                          : "text-xs font-medium text-ai-text"
+                      }
+                    >
                       {m.sender}
                     </span>
                     <span className="text-[11px] text-copy-muted">
@@ -189,8 +306,8 @@ export function AiChatPanel() {
                   <p
                     className={
                       m.role === "user"
-                        ? "rounded-lg bg-chat-user px-3 py-2 whitespace-pre-wrap wrap-break-word text-black/85"
-                        : "rounded-lg bg-elevated px-3 py-2 whitespace-pre-wrap wrap-break-word text-copy-secondary"
+                        ? "rounded-xl bg-chat-user px-3 py-2 whitespace-pre-wrap wrap-break-word text-black/85"
+                        : "rounded-xl border border-surface-border-subtle bg-elevated px-3 py-2 whitespace-pre-wrap wrap-break-word text-copy-secondary"
                     }
                   >
                     {m.content}
@@ -203,8 +320,8 @@ export function AiChatPanel() {
           {runActive ? (
             <div className="flex items-center gap-2 border-t border-surface-border-subtle bg-elevated px-3 py-1.5 text-xs text-copy-secondary">
               <span className="relative flex h-1.5 w-1.5 shrink-0">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-chat-user opacity-75" />
-                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-chat-user" />
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-ai opacity-75" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-ai" />
               </span>
               {latestStatus?.text ?? "Working…"}
             </div>
@@ -229,13 +346,13 @@ export function AiChatPanel() {
               rows={1}
               disabled={runActive}
               placeholder="Describe a design change…"
-              className="min-h-9 flex-1 resize-none rounded-lg border border-surface-border bg-background px-3 py-2 text-sm text-copy-primary outline-none placeholder:text-copy-muted focus-visible:border-copy-muted disabled:opacity-50"
+              className="max-h-32 min-h-9 flex-1 resize-none rounded-xl border border-surface-border bg-background px-3 py-2 text-sm text-copy-primary outline-none field-sizing-content placeholder:text-copy-muted focus-visible:border-ai/50 focus-visible:ring-2 focus-visible:ring-ai/20 disabled:opacity-50"
             />
             <Button
               type="submit"
               size="icon-sm"
               disabled={runActive || draft.trim() === ""}
-              className="bg-chat-user text-black hover:bg-chat-user/90"
+              className="bg-ai text-copy-primary hover:bg-ai/90"
               aria-label="Send design prompt"
             >
               {runActive ? (
@@ -248,7 +365,11 @@ export function AiChatPanel() {
         </TabsContent>
 
         <TabsContent value="specs" className="flex min-h-0 flex-1 flex-col">
-          <SpecsPanel projectId={room.id} />
+          <SpecsPanel
+            projectId={room.id}
+            onGenerateSpec={generateSpec}
+            isGenerating={specSubmitting}
+          />
         </TabsContent>
       </Tabs>
     </aside>

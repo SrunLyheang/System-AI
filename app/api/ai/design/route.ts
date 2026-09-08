@@ -4,7 +4,11 @@ import { runs, tasks } from "@trigger.dev/sdk";
 
 import { readJsonObject } from "@/lib/http";
 import { getAccessibleProject, getCurrentIdentity } from "@/lib/project-access";
-import { createTaskRun } from "@/lib/task-runs";
+import {
+  countTaskRunsToday,
+  createTaskRun,
+  DAILY_AI_RUN_LIMIT,
+} from "@/lib/task-runs";
 import type { designAgent } from "@/src/trigger/design-agent";
 
 const CANCEL_ATTEMPTS = 3;
@@ -76,6 +80,15 @@ export async function POST(request: Request) {
   const project = await getAccessibleProject(projectId, identity);
   if (!project) {
     return Response.json({ error: "Not found" }, { status: 404 });
+  }
+
+  if ((await countTaskRunsToday()) >= DAILY_AI_RUN_LIMIT) {
+    return Response.json(
+      {
+        error: `Daily AI limit reached (${DAILY_AI_RUN_LIMIT} runs/day). Try again tomorrow.`,
+      },
+      { status: 429 },
+    );
   }
 
   const handle = await tasks.trigger<typeof designAgent>(

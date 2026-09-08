@@ -1,4 +1,3 @@
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import {
   AbortTaskRunError,
   logger,
@@ -6,9 +5,9 @@ import {
   schemaTask,
 } from "@trigger.dev/sdk";
 import { put } from "@vercel/blob";
-import { generateText } from "ai";
 import { z } from "zod";
 
+import { generateChatText } from "@/lib/ai";
 import { createProjectSpec } from "@/lib/project-specs";
 
 /** Loose shapes — the canvas payload comes straight from the client's React Flow
@@ -112,15 +111,8 @@ export const generateSpec = schemaTask({
   }),
   run: async ({ projectId, chatHistory, nodes, edges }, { ctx }) => {
     try {
-      metadata.set("status", "analyzing");
-
-      const google = createGoogleGenerativeAI({
-        apiKey: process.env.GEMINI_API_KEY,
-      });
-
       metadata.set("status", "generating");
-      const { text } = await generateText({
-        model: google("gemini-3.6-flash"),
+      const text = await generateChatText({
         prompt: specPrompt(nodes, edges, chatHistory),
       });
 

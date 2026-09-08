@@ -15,3 +15,17 @@ export function createTaskRun(runId: string, projectId: string, userId: string) 
 export function findTaskRun(runId: string) {
   return prisma.taskRun.findUnique({ where: { runId } });
 }
+
+/** Max AI task runs (design + spec combined) allowed per calendar day (UTC).
+ *  Guards paid-provider spend — DeepSeek sits first in the fallback chain. */
+export const DAILY_AI_RUN_LIMIT = 50;
+
+/** Count of AI runs triggered since 00:00 UTC today.
+ *  ponytail: not transactional — two racing requests can both pass the check
+ *  and push the count to 21. Fine for a personal spend guard; add a row lock or
+ *  a dedicated counter table if it ever needs to be exact. */
+export function countTaskRunsToday() {
+  const since = new Date();
+  since.setUTCHours(0, 0, 0, 0);
+  return prisma.taskRun.count({ where: { createdAt: { gte: since } } });
+}
