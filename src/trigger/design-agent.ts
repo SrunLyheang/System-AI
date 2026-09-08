@@ -238,7 +238,7 @@ export const designAgent = schemaTask({
         apiKey: process.env.GEMINI_API_KEY,
       });
       const { object: plan } = await generateObject({
-        model: google("gemini-2.0-flash"),
+        model: google("gemini-3.6-flash"),
         schema: planSchema,
         system: systemPrompt(nodes, edges),
         prompt,
