@@ -9,6 +9,7 @@ import {
   AI_STORAGE_KEY,
   CANVAS_EDGE_TYPE,
   CANVAS_NODE_TYPE,
+  finiteNumber,
   NODE_COLORS,
   NODE_SHAPES,
   SHAPE_DEFAULT_SIZE,
@@ -137,9 +138,9 @@ function applyAction(flow: MutableFlow, a: Action) {
       flow.addNode({
         id: a.id,
         type: CANVAS_NODE_TYPE,
-        position: { x: a.x ?? 0, y: a.y ?? 0 },
-        width: a.width ?? size.width,
-        height: a.height ?? size.height,
+        position: { x: finiteNumber(a.x) ?? 0, y: finiteNumber(a.y) ?? 0 },
+        width: finiteNumber(a.width) ?? size.width,
+        height: finiteNumber(a.height) ?? size.height,
         data: {
           label: a.label ?? "",
           color: color.fill,
@@ -149,16 +150,22 @@ function applyAction(flow: MutableFlow, a: Action) {
       });
       return;
     }
-    case "moveNode":
-      if (a.x != null && a.y != null) {
-        flow.updateNode(a.id, { position: { x: a.x, y: a.y } });
+    case "moveNode": {
+      const x = finiteNumber(a.x);
+      const y = finiteNumber(a.y);
+      if (x != null && y != null) {
+        flow.updateNode(a.id, { position: { x, y } });
       }
       return;
-    case "resizeNode":
-      if (a.width != null && a.height != null) {
-        flow.updateNode(a.id, { width: a.width, height: a.height });
+    }
+    case "resizeNode": {
+      const width = finiteNumber(a.width);
+      const height = finiteNumber(a.height);
+      if (width != null && height != null) {
+        flow.updateNode(a.id, { width, height });
       }
       return;
+    }
     case "updateNode": {
       const patch: Partial<CanvasNode["data"]> = {};
       if (a.label != null) patch.label = a.label;
@@ -195,8 +202,12 @@ function applyAction(flow: MutableFlow, a: Action) {
 
 /** Rough canvas point for the agent's presence cursor — the first placed node. */
 function firstPoint(actions: Action[]): { x: number; y: number } | null {
-  const placed = actions.find((a) => a.x != null && a.y != null);
-  return placed ? { x: placed.x as number, y: placed.y as number } : null;
+  for (const a of actions) {
+    const x = finiteNumber(a.x);
+    const y = finiteNumber(a.y);
+    if (x != null && y != null) return { x, y };
+  }
+  return null;
 }
 
 /**
@@ -213,9 +224,11 @@ export const designAgent = schemaTask({
     roomId: z.string(),
   }),
   run: async ({ prompt, roomId }) => {
-    const client = getLiveblocks();
-
     try {
+      // Inside the try so a misconfigured Liveblocks client still surfaces as an
+      // "error" status the room can see, rather than a silent run failure.
+      const client = getLiveblocks();
+
       await setActivity(roomId, {
         status: "thinking",
         message: "Reading the canvas…",

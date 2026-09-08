@@ -20,6 +20,8 @@
   --accent-primary-dim: rgba(0, 200, 212, 0.12);
   --accent-ai: #6457f9;
   --accent-ai-text: #8b82ff;
+  /* Green accent for the user's own AI-chat bubbles / submit button (spec 26). */
+  --accent-chat-user: #62c073;
 
   --state-error: #ff4d4f;
   --state-success: #34d399;
@@ -65,6 +67,7 @@
   --color-accent-dim: var(--accent-primary-dim);
   --color-ai: var(--accent-ai);
   --color-ai-text: var(--accent-ai-text);
+  --color-chat-user: var(--accent-chat-user);
 
   --color-error: var(--state-error);
   --color-success: var(--state-success);

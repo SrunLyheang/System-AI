@@ -85,6 +85,37 @@ export const CANVAS_EDGE_TYPE = "canvasEdge"
 export type CanvasNode = Node<CanvasNodeData, typeof CANVAS_NODE_TYPE>
 export type CanvasEdge = Edge<CanvasEdgeData, typeof CANVAS_EDGE_TYPE>
 
+/** A finite `number`, or `undefined` when the value is missing / `NaN` /
+ *  `±Infinity`. `z.number()` accepts `NaN` and `x ?? 0` / `x != null` don't
+ *  catch it, so model-supplied coordinates must pass through here. */
+export function finiteNumber(n: unknown): number | undefined {
+  return typeof n === "number" && Number.isFinite(n) ? n : undefined
+}
+
+/** Replace any non-finite coordinate/size on a node with a safe value. One node
+ *  with `NaN`/`Infinity` in `position` or `width`/`height` makes React Flow's
+ *  `fitView` compute a `NaN` viewport transform, which crashes `<Background>`
+ *  ("Received NaN for the `y` attribute") and unmounts the whole canvas subtree
+ *  — the AI status panel included. Bad geometry reaches the client from an AI
+ *  plan or from an autosave blob written before the agent was hardened, so the
+ *  canvas guards here too. Returns the same reference when nothing needs fixing
+ *  so untouched nodes don't churn React Flow. */
+export function sanitizeNodeGeometry(node: CanvasNode): CanvasNode {
+  const x = finiteNumber(node.position?.x) ?? 0
+  const y = finiteNumber(node.position?.y) ?? 0
+  const width = node.width == null ? node.width : finiteNumber(node.width)
+  const height = node.height == null ? node.height : finiteNumber(node.height)
+  if (
+    x === node.position?.x &&
+    y === node.position?.y &&
+    width === node.width &&
+    height === node.height
+  ) {
+    return node
+  }
+  return { ...node, position: { ...node.position, x, y }, width, height }
+}
+
 /** Liveblocks Storage key holding the shared design-agent activity. */
 export const AI_STORAGE_KEY = "ai"
 

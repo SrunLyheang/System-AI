@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Panel } from "@xyflow/react";
 import { useOther, useOthers, useStorage } from "@liveblocks/react/suspense";
 import { UserButton, useAuth } from "@clerk/nextjs";
+import { Loader2 } from "lucide-react";
 
 type PresenceUserInfo = Liveblocks["UserMeta"]["info"];
 
@@ -122,6 +123,8 @@ export function AiActivityPanel() {
 /** One live cursor for another participant, colored by their presence color. */
 export function CanvasCursor({ connectionId }: { connectionId: number }) {
   const info = useOther(connectionId, (user) => user.info);
+  // Set while that participant is waiting on an AI response.
+  const thinking = useOther(connectionId, (user) => user.presence.thinking);
   if (!info) return null;
   return (
     <div className="pointer-events-none flex items-start">
@@ -134,10 +137,11 @@ export function CanvasCursor({ connectionId }: { connectionId: number }) {
         />
       </svg>
       <span
-        className="ml-0.5 -mt-0.5 rounded-md px-1.5 py-0.5 text-[11px] font-medium leading-none text-white shadow-sm"
+        className="ml-0.5 -mt-0.5 flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium leading-none text-white shadow-sm"
         style={{ background: info.color }}
       >
         {info.name}
+        {thinking ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
       </span>
     </div>
   );
