@@ -33,21 +33,21 @@ const actionSchema = z.object({
   ]),
   /** Node id (add/move/resize/update/delete) or edge id (addEdge/deleteEdge). */
   id: z.string(),
-  shape: z.enum(NODE_SHAPES).optional(),
-  label: z.string().optional(),
-  /** Index into the fixed palette (0 = neutral default). */
-  colorIndex: z
-    .number()
-    .int()
-    .min(0)
-    .max(NODE_COLORS.length - 1)
-    .optional(),
-  x: z.number().optional(),
-  y: z.number().optional(),
-  width: z.number().optional(),
-  height: z.number().optional(),
-  source: z.string().optional(),
-  target: z.string().optional(),
+  // `.nullish()` everywhere below: Gemini's structured output emits `null` for
+  // fields it chooses to omit, and plain `.optional()` rejects `null` — that
+  // mismatch is what surfaces as "No object generated: response did not match
+  // schema". `applyAction` already treats null and undefined the same.
+  shape: z.enum(NODE_SHAPES).nullish(),
+  label: z.string().nullish(),
+  /** Index into the fixed palette (0 = neutral default). Range is clamped in
+   *  `applyAction`, so keep the schema itself permissive. */
+  colorIndex: z.number().nullish(),
+  x: z.number().nullish(),
+  y: z.number().nullish(),
+  width: z.number().nullish(),
+  height: z.number().nullish(),
+  source: z.string().nullish(),
+  target: z.string().nullish(),
 });
 
 const planSchema = z.object({
@@ -84,6 +84,14 @@ function systemPrompt(
     (c, i) => `${i}: fill ${c.fill} / text ${c.text}`,
   ).join("\n");
   return `You edit a collaborative diagram canvas by emitting a list of actions.
+
+The \`actions\` array is the ONLY thing that changes the canvas — \`summary\` is
+just a caption and modifies nothing. For any request that describes, asks for,
+or refines a system, you MUST return a non-empty \`actions\` array: one addNode
+per component/service/store the request implies, and one addEdge per connection
+between them. Never return an empty \`actions\` array unless the user explicitly
+asks a question that needs no canvas change. Do not describe work in \`summary\`
+that you did not emit as actions.
 
 Allowed node shapes: ${NODE_SHAPES.join(", ")}.
 Color palette (use colorIndex, never raw hex):
@@ -292,6 +300,10 @@ export const designAgent = schemaTask({
     } catch (error) {
       logger.error("design-agent failed", {
         error: error instanceof Error ? error.message : String(error),
+        // `generateObject` attaches the raw model output + parse cause on
+        // NoObjectGeneratedError; surface both so schema misses are debuggable.
+        modelText: (error as { text?: unknown })?.text,
+        cause: (error as { cause?: unknown })?.cause,
       });
       await setActivity(roomId, {
         status: "error",

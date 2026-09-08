@@ -14,6 +14,7 @@ model Project {
   updatedAt      DateTime      @updatedAt
 
   collaborators ProjectCollaborator[]
+  specs         ProjectSpec[]
 
   @@index([ownerId])
   @@index([createdAt])

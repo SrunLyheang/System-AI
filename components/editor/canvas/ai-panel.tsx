@@ -13,6 +13,8 @@ import { useRealtimeRun } from "@trigger.dev/react-hooks";
 import { ArrowUp, Loader2, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { SpecsPanel } from "@/components/editor/canvas/specs-panel";
 import {
   AI_CHAT_FEED_ID,
   AI_STATUS_FEED_ID,
@@ -83,9 +85,12 @@ export function AiChatPanel() {
     accessToken: run?.token,
     enabled: run !== null,
     onComplete: (finished, error) => {
+      const out = finished.output;
       const content = error
         ? "The design agent hit an error. Try again."
-        : (finished.output?.summary ?? "Design updated.");
+        : out && out.applied === 0
+          ? "The design agent didn’t make any canvas changes. Try naming the components you want on the diagram."
+          : (out?.summary ?? "Design updated.");
       void createFeedMessage(AI_CHAT_FEED_ID, {
         sender: "Design agent",
         role: "assistant",
@@ -155,84 +160,97 @@ export function AiChatPanel() {
         <h2 className="text-sm font-medium text-copy-primary">AI chat</h2>
       </div>
 
-      <div
-        ref={scrollRef}
-        className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-3 text-sm"
-      >
-        {chat.length === 0 ? (
-          <p className="my-auto text-center text-copy-muted">
-            Describe a change and the design agent will update the canvas.
-          </p>
-        ) : (
-          chat.map((m) => (
-            <div key={m.id} className="flex flex-col gap-0.5">
-              <div className="flex items-baseline gap-2">
-                <span className="text-xs font-medium text-copy-primary">
-                  {m.sender}
-                </span>
-                <span className="text-[11px] text-copy-muted">
-                  {formatTime(m.timestamp)}
-                </span>
-              </div>
-              <p
-                className={
-                  m.role === "user"
-                    ? "rounded-lg bg-chat-user px-3 py-2 whitespace-pre-wrap wrap-break-word text-black/85"
-                    : "rounded-lg bg-elevated px-3 py-2 whitespace-pre-wrap wrap-break-word text-copy-secondary"
-                }
-              >
-                {m.content}
+      <Tabs defaultValue="chat" className="flex min-h-0 flex-1 flex-col gap-0">
+        <TabsList className="mx-4 mt-3 grid grid-cols-2">
+          <TabsTrigger value="chat">Chat</TabsTrigger>
+          <TabsTrigger value="specs">Specs</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="chat" className="flex min-h-0 flex-1 flex-col">
+          <div
+            ref={scrollRef}
+            className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-3 text-sm"
+          >
+            {chat.length === 0 ? (
+              <p className="my-auto text-center text-copy-muted">
+                Describe a change and the design agent will update the canvas.
               </p>
+            ) : (
+              chat.map((m) => (
+                <div key={m.id} className="flex flex-col gap-0.5">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-xs font-medium text-copy-primary">
+                      {m.sender}
+                    </span>
+                    <span className="text-[11px] text-copy-muted">
+                      {formatTime(m.timestamp)}
+                    </span>
+                  </div>
+                  <p
+                    className={
+                      m.role === "user"
+                        ? "rounded-lg bg-chat-user px-3 py-2 whitespace-pre-wrap wrap-break-word text-black/85"
+                        : "rounded-lg bg-elevated px-3 py-2 whitespace-pre-wrap wrap-break-word text-copy-secondary"
+                    }
+                  >
+                    {m.content}
+                  </p>
+                </div>
+              ))
+            )}
+          </div>
+
+          {runActive ? (
+            <div className="flex items-center gap-2 border-t border-surface-border-subtle bg-elevated px-3 py-1.5 text-xs text-copy-secondary">
+              <span className="relative flex h-1.5 w-1.5 shrink-0">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-chat-user opacity-75" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-chat-user" />
+              </span>
+              {latestStatus?.text ?? "Working…"}
             </div>
-          ))
-        )}
-      </div>
+          ) : null}
 
-      {runActive ? (
-        <div className="flex items-center gap-2 border-t border-surface-border-subtle bg-elevated px-3 py-1.5 text-xs text-copy-secondary">
-          <span className="relative flex h-1.5 w-1.5 shrink-0">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-chat-user opacity-75" />
-            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-chat-user" />
-          </span>
-          {latestStatus?.text ?? "Working…"}
-        </div>
-      ) : null}
-
-      <form
-        className="flex items-end gap-2 border-t border-surface-border-subtle p-3"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void submit();
-        }}
-      >
-        <textarea
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
+          <form
+            className="flex items-end gap-2 border-t border-surface-border-subtle p-3"
+            onSubmit={(event) => {
               event.preventDefault();
               void submit();
-            }
-          }}
-          rows={1}
-          disabled={runActive}
-          placeholder="Describe a design change…"
-          className="min-h-9 flex-1 resize-none rounded-lg border border-surface-border bg-background px-3 py-2 text-sm text-copy-primary outline-none placeholder:text-copy-muted focus-visible:border-copy-muted disabled:opacity-50"
-        />
-        <Button
-          type="submit"
-          size="icon-sm"
-          disabled={runActive || draft.trim() === ""}
-          className="bg-chat-user text-black hover:bg-chat-user/90"
-          aria-label="Send design prompt"
-        >
-          {runActive ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <ArrowUp className="h-4 w-4" />
-          )}
-        </Button>
-      </form>
+            }}
+          >
+            <textarea
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  void submit();
+                }
+              }}
+              rows={1}
+              disabled={runActive}
+              placeholder="Describe a design change…"
+              className="min-h-9 flex-1 resize-none rounded-lg border border-surface-border bg-background px-3 py-2 text-sm text-copy-primary outline-none placeholder:text-copy-muted focus-visible:border-copy-muted disabled:opacity-50"
+            />
+            <Button
+              type="submit"
+              size="icon-sm"
+              disabled={runActive || draft.trim() === ""}
+              className="bg-chat-user text-black hover:bg-chat-user/90"
+              aria-label="Send design prompt"
+            >
+              {runActive ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <ArrowUp className="h-4 w-4" />
+              )}
+            </Button>
+          </form>
+        </TabsContent>
+
+        <TabsContent value="specs" className="flex min-h-0 flex-1 flex-col">
+          <SpecsPanel projectId={room.id} />
+        </TabsContent>
+      </Tabs>
     </aside>
   );
 }
