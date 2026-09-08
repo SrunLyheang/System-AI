@@ -160,6 +160,16 @@ export function SpecsPanel({ projectId }: { projectId: string }) {
             <DialogTitle className="truncate pr-8">
               {selected?.filename ?? "Spec"}
             </DialogTitle>
+            {selected ? (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label={`Download ${selected.filename}`}
+                onClick={() => downloadSpec(projectId, selected.id)}
+              >
+                <Download className="h-3.5 w-3.5" />
+              </Button>
+            ) : null}
           </DialogHeader>
           <div className="min-h-0 flex-1 overflow-y-auto">
             {previewError ? (

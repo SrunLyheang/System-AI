@@ -1,7 +1,7 @@
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { AbortTaskRunError, logger, schemaTask } from "@trigger.dev/sdk";
 import { mutateFlow } from "@liveblocks/react-flow/node";
-import { generateObject } from "ai";
+import { generateText } from "ai";
 import { z } from "zod";
 
 import { getLiveblocks } from "@/lib/liveblocks";
@@ -56,6 +56,53 @@ const planSchema = z.object({
 });
 
 type Action = z.infer<typeof actionSchema>;
+
+/** Appended to the system prompt. `generateText` + manual parse instead of
+ *  `generateObject`: Gemini's native structured output rejects this schema's
+ *  optional/union fields and returns "response did not match schema". */
+const JSON_FORMAT_INSTRUCTIONS = `
+
+Respond with ONLY a raw JSON object — no markdown fences, no commentary:
+{"summary": string, "actions": Action[]}
+Each Action is {"type": "addNode"|"moveNode"|"resizeNode"|"updateNode"|"deleteNode"|"addEdge"|"deleteEdge", "id": string, plus only the fields that action needs (shape, label, colorIndex, x, y, width, height, source, target). Omit unused fields entirely.`;
+
+/** Extract the first JSON object from a model reply (tolerating stray prose or
+ *  ``` fences) and validate it against `planSchema`. */
+function parsePlan(text: string): z.infer<typeof planSchema> {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end <= start) {
+    throw new Error(
+      `model reply had no JSON object (reply length ${text.length})`,
+    );
+  }
+  const parsed = planSchema.safeParse(JSON.parse(text.slice(start, end + 1)));
+  if (!parsed.success) {
+    throw new Error(`model JSON did not match schema: ${parsed.error.message}`);
+  }
+  return parsed.data;
+}
+
+function normalizeColorIndex(
+  value: number | null | undefined,
+): number | null | undefined {
+  if (value == null || !Number.isFinite(value))
+    return value == null ? value : null;
+  return Math.min(NODE_COLORS.length - 1, Math.max(0, Math.trunc(value)));
+}
+
+function redactedDiagnostic(value: unknown) {
+  if (value == null) return { present: false };
+  if (typeof value === "string") {
+    return {
+      present: true,
+      kind: "text",
+      length: Math.min(value.length, 1000),
+      truncated: value.length > 1000,
+    };
+  }
+  return { present: true, kind: typeof value };
+}
 
 /** Replace the shared `ai` Storage object so every participant sees the agent's
  *  current state. Each call writes a complete object — no partial merge. */
@@ -141,7 +188,8 @@ function applyAction(flow: MutableFlow, a: Action) {
   switch (a.type) {
     case "addNode": {
       const shape = a.shape ?? "rectangle";
-      const color = NODE_COLORS[a.colorIndex ?? 0] ?? NODE_COLORS[0];
+      const colorIndex = normalizeColorIndex(a.colorIndex);
+      const color = NODE_COLORS[colorIndex ?? 0] ?? NODE_COLORS[0];
       const size = SHAPE_DEFAULT_SIZE[shape];
       flow.addNode({
         id: a.id,
@@ -176,10 +224,11 @@ function applyAction(flow: MutableFlow, a: Action) {
     }
     case "updateNode": {
       const patch: Partial<CanvasNode["data"]> = {};
+      const colorIndex = normalizeColorIndex(a.colorIndex);
       if (a.label != null) patch.label = a.label;
       if (a.shape != null) patch.shape = a.shape;
-      if (a.colorIndex != null) {
-        const c = NODE_COLORS[a.colorIndex];
+      if (colorIndex != null) {
+        const c = NODE_COLORS[colorIndex];
         if (c) {
           patch.color = c.fill;
           patch.textColor = c.text;
@@ -258,12 +307,12 @@ export const designAgent = schemaTask({
       const google = createGoogleGenerativeAI({
         apiKey: process.env.GEMINI_API_KEY,
       });
-      const { object: plan } = await generateObject({
+      const { text } = await generateText({
         model: google("gemini-3.6-flash"),
-        schema: planSchema,
-        system: systemPrompt(nodes, edges),
+        system: systemPrompt(nodes, edges) + JSON_FORMAT_INSTRUCTIONS,
         prompt,
       });
+      const plan = parsePlan(text);
 
       logger.info("design-agent plan", {
         summary: plan.summary,
@@ -300,10 +349,8 @@ export const designAgent = schemaTask({
     } catch (error) {
       logger.error("design-agent failed", {
         error: error instanceof Error ? error.message : String(error),
-        // `generateObject` attaches the raw model output + parse cause on
-        // NoObjectGeneratedError; surface both so schema misses are debuggable.
-        modelText: (error as { text?: unknown })?.text,
-        cause: (error as { cause?: unknown })?.cause,
+        modelText: redactedDiagnostic((error as { text?: unknown })?.text),
+        cause: redactedDiagnostic((error as { cause?: unknown })?.cause),
       });
       await setActivity(roomId, {
         status: "error",

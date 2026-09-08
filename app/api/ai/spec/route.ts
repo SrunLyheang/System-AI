@@ -16,7 +16,11 @@ function idempotencyKeyForRequest(
   payload: unknown,
 ) {
   const clientKey = request.headers.get("Idempotency-Key")?.trim();
-  if (clientKey) return clientKey;
+  if (clientKey) {
+    return createHash("sha256")
+      .update(JSON.stringify({ userId, projectId, clientKey }))
+      .digest("hex");
+  }
 
   return createHash("sha256")
     .update(JSON.stringify({ userId, projectId, payload }))
@@ -106,7 +110,10 @@ export async function POST(request: Request) {
       });
     }
 
-    return Response.json({ error: "Unable to record spec run" }, { status: 500 });
+    return Response.json(
+      { error: "Unable to record spec run" },
+      { status: 500 },
+    );
   }
 
   return Response.json({ runId: handle.id });
