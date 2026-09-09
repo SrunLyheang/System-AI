@@ -1,53 +1,10 @@
-import { createHash } from "node:crypto";
+import { tasks } from "@trigger.dev/sdk";
 
-import { runs, tasks } from "@trigger.dev/sdk";
-
+import { aiRunIdempotencyKey, recordRunOrCancel } from "@/lib/ai-run";
 import { readJsonObject } from "@/lib/http";
 import { getAccessibleProject, getCurrentIdentity } from "@/lib/project-access";
-import {
-  countTaskRunsToday,
-  createTaskRun,
-  DAILY_AI_RUN_LIMIT,
-} from "@/lib/task-runs";
+import { countTaskRunsToday, DAILY_AI_RUN_LIMIT } from "@/lib/task-runs";
 import type { generateSpec } from "@/src/trigger/generate-spec";
-
-const CANCEL_ATTEMPTS = 3;
-
-function idempotencyKeyForRequest(
-  request: Request,
-  userId: string,
-  projectId: string,
-  payload: unknown,
-) {
-  const clientKey = request.headers.get("Idempotency-Key")?.trim();
-  if (clientKey) {
-    return createHash("sha256")
-      .update(JSON.stringify({ userId, projectId, clientKey }))
-      .digest("hex");
-  }
-
-  return createHash("sha256")
-    .update(JSON.stringify({ userId, projectId, payload }))
-    .digest("hex");
-}
-
-async function cancelRunWithRetry(runId: string) {
-  let lastError: unknown;
-
-  for (let attempt = 0; attempt < CANCEL_ATTEMPTS; attempt += 1) {
-    try {
-      await runs.cancel(runId);
-      return;
-    } catch (error) {
-      lastError = error;
-      if (attempt < CANCEL_ATTEMPTS - 1) {
-        await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt));
-      }
-    }
-  }
-
-  throw lastError;
-}
 
 /**
  * POST /api/ai/spec — kick off a spec generation run.
@@ -114,34 +71,21 @@ export async function POST(request: Request) {
     "generate-spec",
     { projectId: project.id, roomId, chatHistory, nodes, edges },
     {
-      idempotencyKey: idempotencyKeyForRequest(
-        request,
-        identity.userId,
-        project.id,
-        { chatHistory, nodes, edges },
-      ),
+      idempotencyKey: aiRunIdempotencyKey(request, {
+        userId: identity.userId,
+        projectId: project.id,
+        payload: { chatHistory, nodes, edges },
+      }),
       idempotencyKeyTTL: "24h",
     },
   );
 
-  try {
-    await createTaskRun(handle.id, project.id, identity.userId);
-  } catch (error) {
-    try {
-      await cancelRunWithRetry(handle.id);
-    } catch (cancelError) {
-      console.error("Failed to cancel an untracked spec run", {
-        runId: handle.id,
-        error,
-        cancelError,
-      });
-    }
-
-    return Response.json(
-      { error: "Unable to record spec run" },
-      { status: 500 },
-    );
-  }
+  const recordError = await recordRunOrCancel(
+    handle.id,
+    project.id,
+    identity.userId,
+  );
+  if (recordError) return recordError;
 
   return Response.json({ runId: handle.id });
 }

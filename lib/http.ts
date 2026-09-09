@@ -1,15 +1,13 @@
-/** Thrown by {@link readJsonBody} when the body is present but not a valid JSON object. */
-class InvalidJsonBodyError extends Error {}
-
 /**
- * Parse a JSON request body into a plain object. Returns an empty object only
- * when the body is absent/empty, so callers can default missing fields.
- * Throws {@link InvalidJsonBodyError} for malformed JSON, `null`, arrays, or
- * any other non-object JSON value.
+ * Parse a JSON request body into a plain object. Returns an empty object when
+ * the body is absent/empty, so callers can default missing fields. Returns a
+ * ready-to-return `400` response for malformed JSON, `null`, arrays, or any
+ * other non-object JSON value. Route handlers do
+ * `const body = await readJsonObject(request); if (body instanceof Response) return body;`.
  */
-export async function readJsonBody(
+export async function readJsonObject(
   request: Request,
-): Promise<Record<string, unknown>> {
+): Promise<Record<string, unknown> | Response> {
   const text = await request.text();
   if (text.trim().length === 0) {
     return {};
@@ -19,29 +17,17 @@ export async function readJsonBody(
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw new InvalidJsonBodyError("Request body is not valid JSON");
+    return Response.json(
+      { error: "Request body is not valid JSON" },
+      { status: 400 },
+    );
   }
 
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new InvalidJsonBodyError("Request body must be a JSON object");
+    return Response.json(
+      { error: "Request body must be a JSON object" },
+      { status: 400 },
+    );
   }
   return parsed as Record<string, unknown>;
-}
-
-/**
- * Like {@link readJsonBody}, but a malformed body yields a ready-to-return
- * `400` response instead of throwing. Route handlers do
- * `const body = await readJsonObject(request); if (body instanceof Response) return body;`.
- */
-export async function readJsonObject(
-  request: Request,
-): Promise<Record<string, unknown> | Response> {
-  try {
-    return await readJsonBody(request);
-  } catch (error) {
-    if (error instanceof InvalidJsonBodyError) {
-      return Response.json({ error: error.message }, { status: 400 });
-    }
-    throw error;
-  }
 }
