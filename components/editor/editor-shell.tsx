@@ -28,25 +28,20 @@ function EditorShell({
 
   return (
     <div className="flex h-screen flex-col">
-      <nav className="flex h-14 w-full shrink-0 items-center border-b border-surface-border-subtle bg-surface px-3">
-        <div className="flex flex-1 items-center justify-start">
-          <Button
-            variant="outline"
-            size="icon-sm"
-            onClick={() => setIsSidebarOpen((open) => !open)}
-            aria-label={isSidebarOpen ? "Close sidebar" : "Open sidebar"}
-          >
-            {isSidebarOpen ? (
-              <PanelLeftClose className="h-4 w-4" />
-            ) : (
-              <PanelLeftOpen className="h-4 w-4" />
-            )}
-          </Button>
-        </div>
-        <div className="flex flex-1 items-center justify-center" />
-        <div className="flex flex-1 items-center justify-end">
-          <UserButton />
-        </div>
+      <nav className="flex h-14 w-full shrink-0 items-center justify-between border-b border-surface-border-subtle bg-surface px-3">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={() => setIsSidebarOpen((open) => !open)}
+          aria-label={isSidebarOpen ? "Close sidebar" : "Open sidebar"}
+        >
+          {isSidebarOpen ? (
+            <PanelLeftClose className="h-4 w-4" />
+          ) : (
+            <PanelLeftOpen className="h-4 w-4" />
+          )}
+        </Button>
+        <UserButton />
       </nav>
 
       <ProjectSidebar

@@ -1,13 +1,9 @@
-import {
-  AbortTaskRunError,
-  logger,
-  metadata,
-  schemaTask,
-} from "@trigger.dev/sdk";
+import { AbortTaskRunError, logger, schemaTask } from "@trigger.dev/sdk";
 import { put } from "@vercel/blob";
 import { z } from "zod";
 
 import { generateChatText } from "@/lib/ai";
+import { setActivity } from "@/lib/ai-activity";
 import { createProjectSpec } from "@/lib/project-specs";
 
 /** Loose shapes — the canvas payload comes straight from the client's React Flow
@@ -96,8 +92,9 @@ ${conversation || "(no conversation captured)"}`;
 
 /**
  * Spec generation task. Turns a design canvas + chat context into a Markdown
- * technical spec via Gemini. Progress is published to run metadata for realtime
- * tracking; the finished Markdown is the task output.
+ * technical spec via the configured model. Progress is published to the shared
+ * `ai` Storage object (same as the design agent) so the sidebar "thinking" strip
+ * and the canvas indicator track it; the finished Markdown is the task output.
  */
 export const generateSpec = schemaTask({
   id: "generate-spec",
@@ -109,14 +106,31 @@ export const generateSpec = schemaTask({
     nodes: z.array(nodeSchema).default([]),
     edges: z.array(edgeSchema).default([]),
   }),
-  run: async ({ projectId, chatHistory, nodes, edges }, { ctx }) => {
+  run: async ({ projectId, roomId, chatHistory, nodes, edges }, { ctx }) => {
     try {
-      metadata.set("status", "generating");
+      await setActivity(roomId, {
+        status: "thinking",
+        message: `Reading ${nodes.length} node${
+          nodes.length === 1 ? "" : "s"
+        } and ${chatHistory.length} message${
+          chatHistory.length === 1 ? "" : "s"
+        }…`,
+      });
+
+      await setActivity(roomId, {
+        status: "generating",
+        message: "Drafting the technical specification…",
+      });
       const text = await generateChatText({
         prompt: specPrompt(nodes, edges, chatHistory),
       });
 
       const spec = text.trim();
+
+      await setActivity(roomId, {
+        status: "generating",
+        message: "Saving the spec…",
+      });
 
       // Persist: Markdown content to Vercel Blob, pointer row to Prisma — same
       // split as canvas persistence (`app/api/projects/[projectId]/canvas`).
@@ -135,17 +149,23 @@ export const generateSpec = schemaTask({
         specId: record.id,
       });
 
-      metadata.set("status", "done");
+      await setActivity(roomId, {
+        status: "done",
+        message: "Spec ready — open the Specs tab to view it.",
+      });
       return { spec, specId: record.id };
     } catch (error) {
       logger.error("generate-spec failed", {
         error: error instanceof Error ? error.message : String(error),
       });
-      metadata.set("status", "error");
-      // Model / provider failures won't recover on a blind retry.
-      throw new AbortTaskRunError(
-        error instanceof Error ? error.message : "generate-spec failed",
-      );
+      await setActivity(roomId, {
+        status: "error",
+        message: "Spec generation failed. Try again.",
+      }).catch(() => {});
+      // Model / provider failures won't recover on a blind retry. Raw provider
+      // errors reach the subscribed client via the run surface, so the message
+      // is generic — the detail is in the log above.
+      throw new AbortTaskRunError("Spec generation failed. Please try again.");
     }
   },
 });

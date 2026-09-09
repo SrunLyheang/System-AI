@@ -8,6 +8,7 @@ export const NODE_SHAPES = [
   "pill",
   "cylinder",
   "hexagon",
+  "text",
 ] as const
 
 /** Node body shape rendered on the canvas. */
@@ -48,6 +49,8 @@ export const SHAPE_DEFAULT_SIZE: Record<
   pill: { width: 160, height: 64 },
   cylinder: { width: 120, height: 120 },
   hexagon: { width: 160, height: 100 },
+  // Free-standing text comment: no shape box, grows to fit its content.
+  text: { width: 200, height: 40 },
 }
 
 /** `dataTransfer` MIME type for a shape dragged from the bottom panel. */
@@ -74,6 +77,9 @@ export interface CanvasNodeData {
 export interface CanvasEdgeData {
   /** Inline edge label, edited by double-clicking the edge. */
   label?: string
+  /** Position of the label along the edge as a 0..1 fraction of the path
+   *  length, set by dragging the label. Absent means the path midpoint. */
+  labelT?: number
   // React Flow requires edge data to be an index-signature record.
   [key: string]: unknown
 }

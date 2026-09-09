@@ -3,16 +3,15 @@ import { mutateFlow } from "@liveblocks/react-flow/node";
 import { z } from "zod";
 
 import { generateChatText } from "@/lib/ai";
+import { setActivity } from "@/lib/ai-activity";
 import { getLiveblocks } from "@/lib/liveblocks";
 import {
-  AI_STORAGE_KEY,
   CANVAS_EDGE_TYPE,
   CANVAS_NODE_TYPE,
   finiteNumber,
   NODE_COLORS,
   NODE_SHAPES,
   SHAPE_DEFAULT_SIZE,
-  type AiActivity,
   type CanvasEdge,
   type CanvasNode,
 } from "@/types/canvas";
@@ -101,25 +100,6 @@ function redactedDiagnostic(value: unknown) {
     };
   }
   return { present: true, kind: typeof value };
-}
-
-/** Replace the shared `ai` Storage object so every participant sees the agent's
- *  current state. Each call writes a complete object — no partial merge. */
-async function setActivity(
-  roomId: string,
-  patch: Partial<Omit<AiActivity, "updatedAt">>,
-) {
-  const client = getLiveblocks();
-  const next: AiActivity = {
-    status: "idle",
-    message: "",
-    cursor: null,
-    ...patch,
-    updatedAt: Date.now(),
-  };
-  await client.mutateStorage(roomId, ({ root }) => {
-    root.set(AI_STORAGE_KEY, next);
-  });
 }
 
 function systemPrompt(
@@ -287,7 +267,7 @@ export const designAgent = schemaTask({
 
       await setActivity(roomId, {
         status: "thinking",
-        message: "Reading the canvas…",
+        message: "Reading your canvas…",
       });
 
       // Snapshot the current graph for model context.
@@ -300,12 +280,22 @@ export const designAgent = schemaTask({
 
       await setActivity(roomId, {
         status: "thinking",
-        message: "Designing a layout…",
+        message:
+          nodes.length === 0
+            ? "Planning the diagram from scratch…"
+            : `Planning changes to ${nodes.length} node${
+                nodes.length === 1 ? "" : "s"
+              }…`,
       });
 
       const text = await generateChatText({
         system: systemPrompt(nodes, edges) + JSON_FORMAT_INSTRUCTIONS,
         prompt,
+      });
+
+      await setActivity(roomId, {
+        status: "thinking",
+        message: "Working out the layout…",
       });
       const plan = parsePlan(text);
 
@@ -324,9 +314,9 @@ export const designAgent = schemaTask({
 
       await setActivity(roomId, {
         status: "generating",
-        message: `Applying ${plan.actions.length} change${
+        message: `Drawing ${plan.actions.length} change${
           plan.actions.length === 1 ? "" : "s"
-        }…`,
+        } onto the canvas…`,
         cursor: firstPoint(plan.actions),
       });
 
@@ -353,9 +343,9 @@ export const designAgent = schemaTask({
         cursor: null,
       }).catch(() => {});
       // Structured-output / provider failures won't succeed on blind retry.
-      throw new AbortTaskRunError(
-        error instanceof Error ? error.message : "design-agent failed",
-      );
+      // Raw provider errors reach the subscribed client via the run surface, so
+      // the message is generic — the detail is in the log above.
+      throw new AbortTaskRunError("Design generation failed. Please try again.");
     }
   },
 });

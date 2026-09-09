@@ -77,12 +77,20 @@ export async function POST(request: Request) {
     );
   }
 
+  // Bound the prompt so one request can't run up an outsized token bill.
+  if (prompt.length > 20_000) {
+    return Response.json(
+      { error: "prompt too long (max 20000 characters)" },
+      { status: 413 },
+    );
+  }
+
   const project = await getAccessibleProject(projectId, identity);
   if (!project) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
 
-  if ((await countTaskRunsToday()) >= DAILY_AI_RUN_LIMIT) {
+  if ((await countTaskRunsToday(identity.userId)) >= DAILY_AI_RUN_LIMIT) {
     return Response.json(
       {
         error: `Daily AI limit reached (${DAILY_AI_RUN_LIMIT} runs/day). Try again tomorrow.`,

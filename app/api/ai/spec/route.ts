@@ -81,13 +81,27 @@ export async function POST(request: Request) {
     );
   }
 
+  // Bound the payload — the whole canvas + chat is stringified into the prompt,
+  // and the per-user daily cap doesn't limit per-run token cost.
+  if (
+    nodes.length > 500 ||
+    edges.length > 1000 ||
+    chatHistory.length > 200 ||
+    JSON.stringify({ chatHistory, nodes, edges }).length > 200_000
+  ) {
+    return Response.json(
+      { error: "Canvas or chat history too large for spec generation" },
+      { status: 413 },
+    );
+  }
+
   // Room id == project id, but resolve access through the authenticated user.
   const project = await getAccessibleProject(roomId, identity);
   if (!project) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
 
-  if ((await countTaskRunsToday()) >= DAILY_AI_RUN_LIMIT) {
+  if ((await countTaskRunsToday(identity.userId)) >= DAILY_AI_RUN_LIMIT) {
     return Response.json(
       {
         error: `Daily AI limit reached (${DAILY_AI_RUN_LIMIT} runs/day). Try again tomorrow.`,

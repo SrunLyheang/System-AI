@@ -3,11 +3,11 @@
 import { useEffect, useState } from "react";
 
 import {
+  Bot,
   LayoutTemplate,
   PanelLeftClose,
   PanelLeftOpen,
   Share2,
-  Sparkles,
 } from "lucide-react";
 import { ReactFlowProvider } from "@xyflow/react";
 
@@ -65,9 +65,9 @@ function WorkspaceShell({
     <CanvasSaveProvider>
       <div className="flex h-screen flex-col">
       <nav className="flex h-14 w-full shrink-0 items-center gap-3 border-b border-surface-border-subtle bg-surface px-3">
-        <div className="flex flex-1 items-center gap-3 overflow-hidden">
+        <div className="flex min-w-0 flex-1 items-center gap-2.5">
           <Button
-            variant="outline"
+            variant="ghost"
             size="icon-sm"
             onClick={() => setIsSidebarOpen((open) => !open)}
             aria-label={isSidebarOpen ? "Close sidebar" : "Open sidebar"}
@@ -78,17 +78,13 @@ function WorkspaceShell({
               <PanelLeftOpen className="h-4 w-4" />
             )}
           </Button>
-          <span
-            aria-hidden
-            className="h-1.5 w-1.5 shrink-0 rounded-full bg-ai shadow-[0_0_8px_var(--accent-ai)]"
-          />
           <span className="truncate text-sm font-medium text-copy-primary">
             {project.name}
           </span>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1">
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
             onClick={() => {
               if (readyProjectId === project.id) setIsTemplatesOpen(true);
@@ -99,27 +95,24 @@ function WorkspaceShell({
             Templates
           </Button>
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
             onClick={() => setIsShareOpen(true)}
           >
             <Share2 className="h-4 w-4" />
             Share
           </Button>
-          <span aria-hidden className="mx-0.5 h-5 w-px bg-surface-border-subtle" />
+          <span aria-hidden className="mx-1 h-4 w-px bg-surface-border-subtle" />
           <SaveButton />
           <Button
-            variant="outline"
+            variant="ghost"
             size="icon-sm"
             onClick={() => setIsAiSidebarOpen((open) => !open)}
-            aria-label={isAiSidebarOpen ? "Hide AI panel" : "Show AI panel"}
-            className={
-              isAiSidebarOpen
-                ? "border-ai/40 bg-ai/15 text-ai-text hover:bg-ai/20 hover:text-ai-text"
-                : "text-ai-text hover:text-ai-text"
-            }
+            aria-label={isAiSidebarOpen ? "Hide system-agent panel" : "Show system-agent panel"}
+            aria-pressed={isAiSidebarOpen}
+            className={isAiSidebarOpen ? "bg-muted text-ai-text" : "text-ai-text"}
           >
-            <Sparkles className="h-4 w-4" />
+            <Bot className="h-4 w-4" />
           </Button>
         </div>
       </nav>

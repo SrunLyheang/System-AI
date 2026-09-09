@@ -8,21 +8,19 @@ import {
   useFeedMessages,
   useRoom,
   useSelf,
+  useStorage,
 } from "@liveblocks/react";
 import { useReactFlow } from "@xyflow/react";
 import { useRealtimeRun } from "@trigger.dev/react-hooks";
-import { ArrowUp, Loader2, Sparkles } from "lucide-react";
+import { ArrowUp, Bot, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SpecsPanel } from "@/components/editor/canvas/specs-panel";
 import {
   AI_CHAT_FEED_ID,
-  AI_STATUS_FEED_ID,
   aiChatMessageSchema,
-  isAiStatusMessage,
   type AiChatMessage,
-  type AiStatusMessage,
 } from "@/types/tasks";
 import type { designAgent } from "@/src/trigger/design-agent";
 import type { CanvasNode, CanvasEdge } from "@/types/canvas";
@@ -34,15 +32,24 @@ function formatTime(ts: number): string {
   });
 }
 
+/** Shown in the empty chat. Each one submits as a design prompt on click. */
+const STARTER_PROMPTS = [
+  "Add a user sign-in flow backed by a database",
+  "Design a REST API with a cache and a job queue",
+  "Sketch a microservices layout for an online store",
+  "Put a CDN and load balancer in front of the web tier",
+];
+
 /** Right-hand AI sidebar. The composer submits a design prompt: it posts the
  *  user message to the `ai-chat` Liveblocks feed (so every participant sees it),
  *  kicks off the `design-agent` run via `POST /api/ai/design`, then tracks that
  *  run in real time with `useRealtimeRun`. Canvas node/edge/presence changes
  *  land through Liveblocks (`useLiveblocksFlow`) on their own — this component
- *  never touches them. `ai-status-feed` drives the status strip only. */
+ *  never touches them. The shared `ai` Storage object (written by both trigger
+ *  tasks) drives the "thinking" strip. */
 export function AiChatPanel() {
   const room = useRoom();
-  const { messages: statusMessages } = useFeedMessages(AI_STATUS_FEED_ID);
+  const aiActivity = useStorage((root) => root.ai);
   const { messages: chatMessages } = useFeedMessages(AI_CHAT_FEED_ID);
   const createFeed = useCreateFeed();
   const createFeedMessage = useCreateFeedMessage();
@@ -65,6 +72,9 @@ export function AiChatPanel() {
   // completion — unless it timed out, at which point we let the user carry on.
   const runActive = (submitting || run !== null) && !runTimedOut;
 
+  // The "thinking" strip shows while either agent's run is in flight.
+  const showThinking = runActive || specSubmitting || specRun !== null;
+
   // Stop blocking the composer if a completion event never lands.
   useEffect(() => {
     if (run === null) return;
@@ -77,12 +87,6 @@ export function AiChatPanel() {
   useEffect(() => {
     void createFeed(AI_CHAT_FEED_ID).catch(() => {});
   }, [createFeed]);
-
-  // Only the most recent valid status message drives the status strip.
-  const latestStatus = [...(statusMessages ?? [])]
-    .sort((a, b) => b.createdAt - a.createdAt)
-    .map((m) => m.data)
-    .find(isAiStatusMessage) as AiStatusMessage | undefined;
 
   // Validate every feed payload before trusting it, oldest first.
   const chat = [...(chatMessages ?? [])]
@@ -202,17 +206,19 @@ export function AiChatPanel() {
     }
   }
 
-  async function submit() {
-    const prompt = draft.trim();
+  async function submit(override?: string) {
+    const prompt = (override ?? draft).trim();
     if (prompt === "" || runActive) return;
     setSubmitting(true);
     setRunTimedOut(false);
+    // eslint-disable-next-line react-hooks/purity
+    const timestamp = Date.now();
     try {
       await postChat({
         sender: self?.info.name ?? "Anonymous",
         role: "user",
         content: prompt,
-        timestamp: Date.now(),
+        timestamp,
       });
       setDraft("");
 
@@ -252,7 +258,7 @@ export function AiChatPanel() {
           error instanceof Error
             ? error.message
             : "Couldn’t start the design agent. Try again.",
-        timestamp: Date.now(),
+        timestamp,
       });
     } finally {
       setSubmitting(false);
@@ -262,8 +268,8 @@ export function AiChatPanel() {
   return (
     <aside className="flex w-80 shrink-0 flex-col border-l border-surface-border bg-surface">
       <div className="flex items-center gap-2 border-b border-surface-border-subtle px-4 py-3">
-        <Sparkles className="h-4 w-4 text-ai-text" />
-        <h2 className="text-sm font-medium text-copy-primary">AI chat</h2>
+        <Bot className="h-4 w-4 text-ai-text" />
+        <h2 className="text-sm font-medium text-copy-primary">system-agent</h2>
       </div>
 
       <Tabs defaultValue="chat" className="flex min-h-0 flex-1 flex-col gap-0">
@@ -278,13 +284,30 @@ export function AiChatPanel() {
             className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-3 text-sm"
           >
             {chat.length === 0 ? (
-              <div className="my-auto flex flex-col items-center gap-3 px-6 text-center">
-                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-ai/10 text-ai-text">
-                  <Sparkles className="h-6 w-6" />
-                </span>
-                <p className="text-sm text-copy-muted">
-                  Describe a change and the design agent will update the canvas.
-                </p>
+              <div className="my-auto flex flex-col gap-4">
+                <div className="flex flex-col gap-1.5">
+                  <h3 className="text-sm font-medium text-copy-primary">
+                    Start with the design agent
+                  </h3>
+                  <p className="text-[13px] leading-relaxed text-copy-muted">
+                    Describe the system you want and the agent adds the
+                    components and connections to your canvas.
+                  </p>
+                </div>
+                <ul className="flex flex-col gap-1.5">
+                  {STARTER_PROMPTS.map((prompt) => (
+                    <li key={prompt}>
+                      <button
+                        type="button"
+                        onClick={() => void submit(prompt)}
+                        disabled={runActive}
+                        className="w-full rounded-xl border border-surface-border-subtle bg-elevated px-3 py-2 text-left text-[13px] text-copy-secondary transition-colors hover:border-ai/40 hover:text-copy-primary disabled:pointer-events-none disabled:opacity-50"
+                      >
+                        {prompt}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               </div>
             ) : (
               chat.map((m) => (
@@ -306,7 +329,7 @@ export function AiChatPanel() {
                   <p
                     className={
                       m.role === "user"
-                        ? "rounded-xl bg-chat-user px-3 py-2 whitespace-pre-wrap wrap-break-word text-black/85"
+                        ? "rounded-xl border border-chat-user/25 bg-chat-user/12 px-3 py-2 whitespace-pre-wrap wrap-break-word text-copy-primary"
                         : "rounded-xl border border-surface-border-subtle bg-elevated px-3 py-2 whitespace-pre-wrap wrap-break-word text-copy-secondary"
                     }
                   >
@@ -317,13 +340,10 @@ export function AiChatPanel() {
             )}
           </div>
 
-          {runActive ? (
+          {showThinking ? (
             <div className="flex items-center gap-2 border-t border-surface-border-subtle bg-elevated px-3 py-1.5 text-xs text-copy-secondary">
-              <span className="relative flex h-1.5 w-1.5 shrink-0">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-ai opacity-75" />
-                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-ai" />
-              </span>
-              {latestStatus?.text ?? "Working…"}
+              <Loader2 className="h-3 w-3 shrink-0 animate-spin text-ai-text" />
+              {aiActivity?.message || "Working…"}
             </div>
           ) : null}
 

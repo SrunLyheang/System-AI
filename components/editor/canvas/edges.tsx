@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import {
   BaseEdge,
@@ -16,6 +16,43 @@ import { CANVAS_EDGE_TYPE, type CanvasEdge } from "@/types/canvas";
 
 const EDGE_STROKE_REST = "var(--text-muted)";
 const EDGE_STROKE_ACTIVE = "var(--text-primary)";
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/** Point on SVG path `d` at length fraction `t` (0..1), in the path's own
+ *  coordinate space. Measured on a detached `<path>` — `getPointAtLength` works
+ *  without inserting it into the document. Returns `null` for a zero-length or
+ *  unmeasurable path. */
+function pointAtT(d: string, t: number): { x: number; y: number } | null {
+  if (typeof document === "undefined") return null;
+  const el = document.createElementNS(SVG_NS, "path");
+  el.setAttribute("d", d);
+  const len = el.getTotalLength();
+  if (!len) return null;
+  const p = el.getPointAtLength(Math.min(Math.max(t, 0), 1) * len);
+  return { x: p.x, y: p.y };
+}
+
+/** Length fraction (0..1) of the point on path `d` nearest to `(x, y)`, found by
+ *  sampling 100 points — enough for a label that just needs to sit on the line. */
+function nearestT(d: string, x: number, y: number): number {
+  if (typeof document === "undefined") return 0.5;
+  const el = document.createElementNS(SVG_NS, "path");
+  el.setAttribute("d", d);
+  const len = el.getTotalLength();
+  if (!len) return 0.5;
+  let bestT = 0.5;
+  let bestDist = Infinity;
+  for (let i = 0; i <= 100; i++) {
+    const p = el.getPointAtLength((i / 100) * len);
+    const dist = (p.x - x) ** 2 + (p.y - y) ** 2;
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestT = i / 100;
+    }
+  }
+  return bestT;
+}
 
 /** New connections adopt the custom canvas edge with a rounded light stroke
  *  and an arrowhead. React Flow merges this into every edge that lacks the
@@ -45,9 +82,12 @@ function CanvasEdgeView({
   selected = false,
   markerEnd,
 }: EdgeProps<CanvasEdge>) {
-  const { updateEdgeData, deleteElements } = useReactFlow();
+  const { updateEdgeData, deleteElements, screenToFlowPosition } = useReactFlow();
   const [hovered, setHovered] = useState(false);
   const [editing, setEditing] = useState(false);
+  // Live position (0..1 along the path) while dragging the label; committed to
+  // edge data on pointer up.
+  const [dragT, setDragT] = useState<number | null>(null);
 
   const [path, labelX, labelY] = getSmoothStepPath({
     sourceX,
@@ -61,6 +101,48 @@ function CanvasEdgeView({
 
   const active = hovered || selected || editing;
   const label = data?.label ?? "";
+
+  // Where the label sits: a 0..1 fraction along the edge path (live drag value
+  // wins, then the saved one), or the path's own computed midpoint by default.
+  const labelT = dragT ?? data?.labelT ?? null;
+  const anchor = useMemo(() => {
+    if (labelT == null) return { x: labelX, y: labelY };
+    return pointAtT(path, labelT) ?? { x: labelX, y: labelY };
+  }, [labelT, path, labelX, labelY]);
+
+  /** Drag the label along the edge — the pointer is projected onto the path, so
+   *  the label can only slide on the line, never float off it. */
+  const startLabelDrag = (event: React.PointerEvent) => {
+    if (editing) return;
+    event.stopPropagation();
+    const originX = event.clientX;
+    const originY = event.clientY;
+    let latestT: number | null = null;
+    const onMove = (moveEvent: PointerEvent) => {
+      // Ignore the jitter of a plain click so double-click-to-edit still works.
+      if (
+        Math.abs(moveEvent.clientX - originX) +
+          Math.abs(moveEvent.clientY - originY) <
+        3
+      ) {
+        return;
+      }
+      const flow = screenToFlowPosition({
+        x: moveEvent.clientX,
+        y: moveEvent.clientY,
+      });
+      latestT = nearestT(path, flow.x, flow.y);
+      setDragT(latestT);
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      setDragT(null);
+      if (latestT != null) updateEdgeData(id, { labelT: latestT });
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
 
   return (
     <>
@@ -97,10 +179,12 @@ function CanvasEdgeView({
             className="nodrag nopan flex items-center gap-1"
             style={{
               position: "absolute",
-              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+              transform: `translate(-50%, -50%) translate(${anchor.x}px, ${anchor.y}px)`,
               pointerEvents: "all",
+              cursor: editing ? "text" : "move",
             }}
             onMouseDown={(event) => event.stopPropagation()}
+            onPointerDown={startLabelDrag}
             onDoubleClick={(event) => {
               event.stopPropagation();
               setEditing(true);
@@ -126,6 +210,7 @@ function CanvasEdgeView({
             {!editing && (
               <button
                 type="button"
+                onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => {
                   event.stopPropagation();
                   deleteElements({ edges: [{ id }] });
