@@ -37,7 +37,6 @@ const EDGES: ReadonlyArray<readonly [string, string]> = [
 const NW = 148;
 const NH = 46;
 const BW = 540;
-const BH = 420;
 const PROMPT = "Design a URL shortener with caching and analytics";
 
 const AC_CSS = `
@@ -184,11 +183,23 @@ function AuthCanvas() {
       if (!na || !nb) continue;
       const ca = centerOf(na);
       const cb = centerOf(nb);
-      const ax = ca.x < cb.x ? ca.x + NW / 2 : ca.x - NW / 2;
-      const bx = ca.x < cb.x ? cb.x - NW / 2 : cb.x + NW / 2;
-      const mx = (ax + bx) / 2;
+      const dx = cb.x - ca.x;
+      const dy = cb.y - ca.y;
       const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      p.setAttribute("d", `M ${ax} ${ca.y} C ${mx} ${ca.y}, ${mx} ${cb.y}, ${bx} ${cb.y}`);
+      if (Math.abs(dx) >= Math.abs(dy)) {
+        // Farther apart horizontally: enter/exit the left/right sides.
+        const ax = dx >= 0 ? ca.x + NW / 2 : ca.x - NW / 2;
+        const bx = dx >= 0 ? cb.x - NW / 2 : cb.x + NW / 2;
+        const mx = (ax + bx) / 2;
+        p.setAttribute("d", `M ${ax} ${ca.y} C ${mx} ${ca.y}, ${mx} ${cb.y}, ${bx} ${cb.y}`);
+      } else {
+        // Vertically stacked: exit the bottom of the upper node and enter the
+        // top of the lower one, so the edge never wraps around the boxes.
+        const ay = dy >= 0 ? ca.y + NH / 2 : ca.y - NH / 2;
+        const by = dy >= 0 ? cb.y - NH / 2 : cb.y + NH / 2;
+        const my = (ay + by) / 2;
+        p.setAttribute("d", `M ${ca.x} ${ay} C ${ca.x} ${my}, ${cb.x} ${my}, ${cb.x} ${by}`);
+      }
       edgesSvg.appendChild(p);
       p.style.setProperty("--len", String(p.getTotalLength()));
       edgeEls.push(p);
@@ -244,12 +255,12 @@ function AuthCanvas() {
     let cancelled = false;
     let cursorRaf = 0;
     let tiltRaf = 0;
+    let ambientOn = false;
+    let driftIntervalId = 0;
 
     const rand = () => ({ x: 20 + Math.random() * 480, y: 12 + Math.random() * 376 });
-    const intervalId = window.setInterval(() => {
-      for (const c of cursors) c.tgt = rand();
-    }, 2600);
     const drift = () => {
+      if (!ambientOn) return;
       for (const c of cursors) {
         c.pos.x += (c.tgt.x - c.pos.x) * 0.045;
         c.pos.y += (c.tgt.y - c.pos.y) * 0.045;
@@ -257,7 +268,22 @@ function AuthCanvas() {
       }
       cursorRaf = requestAnimationFrame(drift);
     };
-    cursorRaf = requestAnimationFrame(drift);
+    // Ambient cursor drift only runs while the panel is on screen.
+    const startAmbient = () => {
+      if (ambientOn) return;
+      ambientOn = true;
+      driftIntervalId = window.setInterval(() => {
+        for (const c of cursors) c.tgt = rand();
+      }, 2600);
+      cursorRaf = requestAnimationFrame(drift);
+    };
+    const stopAmbient = () => {
+      ambientOn = false;
+      window.clearInterval(driftIntervalId);
+      driftIntervalId = 0;
+      if (cursorRaf) cancelAnimationFrame(cursorRaf);
+      cursorRaf = 0;
+    };
 
     // --- hover = step inside: tilt + spotlight + your own cursor -----------
     const you = document.createElement("div");
@@ -288,7 +314,17 @@ function AuthCanvas() {
       ny = (e.clientY - r.top) / r.height;
       gridGlow.style.setProperty("--gx", `${(nx * 100).toFixed(1)}%`);
       gridGlow.style.setProperty("--gy", `${(ny * 100).toFixed(1)}%`);
-      place(you, nx * BW - 6, ny * BH - 2);
+      // Map the pointer through the board's own rect + render scale so the
+      // stand-in cursor lands under the real pointer — the board is centered
+      // and may be scaled by --ac-board-scale, so shell-relative fractions
+      // times the fixed 540x420 would be off.
+      const br = boardInner.getBoundingClientRect();
+      const boardScale = br.width / BW || 1;
+      place(
+        you,
+        (e.clientX - br.left) / boardScale - 6,
+        (e.clientY - br.top) / boardScale - 2,
+      );
       if (!tiltRaf) tiltRaf = requestAnimationFrame(applyTilt);
     };
     const onLeave = () => {
@@ -371,9 +407,14 @@ function AuthCanvas() {
     const io = new IntersectionObserver(
       (entries) => {
         for (const e of entries) {
-          if (e.isIntersecting && !started) {
-            started = true;
-            void loop();
+          if (e.isIntersecting) {
+            startAmbient();
+            if (!started) {
+              started = true;
+              void loop();
+            }
+          } else {
+            stopAmbient();
           }
         }
       },
@@ -384,8 +425,7 @@ function AuthCanvas() {
     return () => {
       cancelled = true;
       detachCursorHide();
-      window.clearInterval(intervalId);
-      if (cursorRaf) cancelAnimationFrame(cursorRaf);
+      stopAmbient();
       if (tiltRaf) cancelAnimationFrame(tiltRaf);
       io.disconnect();
       shell.removeEventListener("pointerenter", onEnter);

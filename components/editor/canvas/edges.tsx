@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   BaseEdge,
@@ -88,6 +88,10 @@ function CanvasEdgeView({
   // Live position (0..1 along the path) while dragging the label; committed to
   // edge data on pointer up.
   const [dragT, setDragT] = useState<number | null>(null);
+  // Teardown for an in-progress label drag, so an unmount (or a collaborator
+  // deleting the edge) mid-drag can't leak window listeners or call setState.
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => dragCleanupRef.current?.(), []);
 
   const [path, labelX, labelY] = getSmoothStepPath({
     sourceX,
@@ -134,14 +138,27 @@ function CanvasEdgeView({
       latestT = nearestT(path, flow.x, flow.y);
       setDragT(latestT);
     };
-    const onUp = () => {
+    const cleanup = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+      dragCleanupRef.current = null;
+    };
+    const onUp = () => {
+      cleanup();
       setDragT(null);
       if (latestT != null) updateEdgeData(id, { labelT: latestT });
     };
+    // A canceled pointer (touch interrupted, context menu, …) abandons the
+    // drag without committing a new position.
+    const onCancel = () => {
+      cleanup();
+      setDragT(null);
+    };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
+    dragCleanupRef.current = cleanup;
   };
 
   return (
