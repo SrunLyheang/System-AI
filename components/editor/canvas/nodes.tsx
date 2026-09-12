@@ -53,6 +53,7 @@ function SvgShape({
 }
 
 const LABEL_PLACEHOLDER = "Add label";
+const TEXT_PLACEHOLDER = "Add text";
 const MIN_NODE_SIZE = 48;
 const MAX_NODE_SIZE = 800;
 /** Multiplier applied to a node's width/height per toolbar +/- click. */
@@ -96,6 +97,11 @@ function measureLineWidth(el: HTMLTextAreaElement): number {
  *  Selected nodes also show subtle resize handles (React Flow `NodeResizer`). */
 function CanvasNodeView({ id, data, selected = false }: NodeProps<CanvasNode>) {
   const { shape, label } = data;
+  // A free-standing text comment: bare editable text, no shape box, no
+  // connection handles — reuses every other node behaviour (drag, resize,
+  // select, delete, persistence).
+  const isText = shape === "text";
+  const placeholder = isText ? TEXT_PLACEHOLDER : LABEL_PLACEHOLDER;
   // Nodes created before the color feature have no `textColor` (and an old
   // default `color`); fall back so their border/stroke/label still render.
   const color = data.color ?? DEFAULT_NODE_COLOR;
@@ -251,7 +257,7 @@ function CanvasNodeView({ id, data, selected = false }: NodeProps<CanvasNode>) {
           </button>
         </div>
       </NodeToolbar>
-      {CSS_SHAPES.has(shape) ? (
+      {isText ? null : CSS_SHAPES.has(shape) ? (
         <div
           className="absolute inset-0"
           style={{
@@ -268,13 +274,13 @@ function CanvasNodeView({ id, data, selected = false }: NodeProps<CanvasNode>) {
           selected={selected}
         />
       )}
-      <NodeHandles />
+      {isText ? null : <NodeHandles />}
       {editing ? (
         <textarea
           ref={initTextarea}
           rows={1}
           defaultValue={label}
-          placeholder={LABEL_PLACEHOLDER}
+          placeholder={placeholder}
           onChange={(event) => {
             fitSize(event.currentTarget);
             updateNodeData(id, { label: event.target.value });
@@ -289,7 +295,7 @@ function CanvasNodeView({ id, data, selected = false }: NodeProps<CanvasNode>) {
           className={`relative z-10 whitespace-pre-wrap wrap-break-word ${label ? "" : "text-copy-muted"}`}
           style={label ? { color: textColor } : undefined}
         >
-          {label || LABEL_PLACEHOLDER}
+          {label || placeholder}
         </span>
       )}
     </div>

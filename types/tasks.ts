@@ -1,14 +1,9 @@
-/** Shared AI activity signalled through Liveblocks feeds. This unit only carries
- *  status — the actual design/spec generation flow is not wired yet. */
+/** Room chat feed for human messages typed into the AI sidebar. AI generation
+ *  progress does not go here — it lives on the shared `ai` Storage object
+ *  (`types/canvas.ts`), written by the trigger tasks via `lib/ai-activity.ts`. */
 
 import { z } from "zod"
 
-/** Liveblocks feed id every room uses for AI generation status. Generic on
- *  purpose so design and spec generation can both post to it later. */
-export const AI_STATUS_FEED_ID = "ai-status-feed"
-
-/** Room chat feed. Kept separate from {@link AI_STATUS_FEED_ID} — this one only
- *  carries human messages typed into the sidebar, never AI progress/status. */
 export const AI_CHAT_FEED_ID = "ai-chat"
 
 /** One `ai-chat` feed message. Feed payloads arrive as untyped JSON, so every
@@ -25,21 +20,3 @@ export const aiChatMessageSchema = z.object({
 })
 
 export type AiChatMessage = z.infer<typeof aiChatMessageSchema>
-
-/** Payload of one `ai-status-feed` message. Feed messages arrive as untyped
- *  JSON, so every consumer must run it through {@link isAiStatusMessage} first. */
-export interface AiStatusMessage {
-  /** True while a generation run is in progress. Gates the sidebar chat input. */
-  active: boolean
-  /** Optional human-readable status line shown in the sidebar. */
-  text?: string
-}
-
-/** Runtime validation for an incoming feed message payload. */
-export function isAiStatusMessage(data: unknown): data is AiStatusMessage {
-  if (typeof data !== "object" || data === null) return false
-  const d = data as Record<string, unknown>
-  if (typeof d.active !== "boolean") return false
-  if (d.text !== undefined && typeof d.text !== "string") return false
-  return true
-}

@@ -5,6 +5,7 @@ import {
   Hexagon,
   Pill,
   RectangleHorizontal,
+  Type,
   type LucideIcon,
 } from "lucide-react";
 
@@ -40,6 +41,7 @@ export const SHAPE_ICONS: Record<CanvasNodeShape, LucideIcon> = {
   pill: Pill,
   cylinder: Cylinder,
   hexagon: Hexagon,
+  text: Type,
 };
 
 /** Off-screen element used as the native drag image — same shape and default
@@ -48,6 +50,11 @@ export function createShapeGhost(shape: CanvasNodeShape): HTMLElement {
   const { width, height } = SHAPE_DEFAULT_SIZE[shape];
   const el = document.createElement("div");
   el.style.cssText = `position:fixed;top:-1000px;left:-1000px;width:${width}px;height:${height}px;pointer-events:none;`;
+  if (shape === "text") {
+    el.textContent = "Text";
+    el.style.cssText += `color:${DEFAULT_NODE_TEXT_COLOR};font:500 14px system-ui,sans-serif;`;
+    return el;
+  }
   const svg = SHAPE_SVG_PATHS[shape];
   if (svg) {
     el.innerHTML = `<svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none" fill="${DEFAULT_NODE_COLOR}" stroke="${DEFAULT_NODE_TEXT_COLOR}" stroke-width="2">${svg}</svg>`;

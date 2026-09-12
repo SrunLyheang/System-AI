@@ -1,50 +1,10 @@
-import { createHash } from "node:crypto";
+import { tasks } from "@trigger.dev/sdk";
 
-import { runs, tasks } from "@trigger.dev/sdk";
-
+import { aiRunIdempotencyKey, recordRunOrCancel } from "@/lib/ai-run";
 import { readJsonObject } from "@/lib/http";
 import { getAccessibleProject, getCurrentIdentity } from "@/lib/project-access";
-import {
-  countTaskRunsToday,
-  createTaskRun,
-  DAILY_AI_RUN_LIMIT,
-} from "@/lib/task-runs";
+import { countTaskRunsToday, DAILY_AI_RUN_LIMIT } from "@/lib/task-runs";
 import type { designAgent } from "@/src/trigger/design-agent";
-
-const CANCEL_ATTEMPTS = 3;
-
-function idempotencyKeyForRequest(
-  request: Request,
-  userId: string,
-  projectId: string,
-  roomId: string,
-  prompt: string,
-) {
-  const clientKey = request.headers.get("Idempotency-Key")?.trim();
-  if (clientKey) return clientKey;
-
-  return createHash("sha256")
-    .update(JSON.stringify({ userId, projectId, roomId, prompt }))
-    .digest("hex");
-}
-
-async function cancelRunWithRetry(runId: string) {
-  let lastError: unknown;
-
-  for (let attempt = 0; attempt < CANCEL_ATTEMPTS; attempt += 1) {
-    try {
-      await runs.cancel(runId);
-      return;
-    } catch (error) {
-      lastError = error;
-      if (attempt < CANCEL_ATTEMPTS - 1) {
-        await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt));
-      }
-    }
-  }
-
-  throw lastError;
-}
 
 /**
  * POST /api/ai/design — kick off a design generation run.
@@ -77,12 +37,20 @@ export async function POST(request: Request) {
     );
   }
 
+  // Bound the prompt so one request can't run up an outsized token bill.
+  if (prompt.length > 20_000) {
+    return Response.json(
+      { error: "prompt too long (max 20000 characters)" },
+      { status: 413 },
+    );
+  }
+
   const project = await getAccessibleProject(projectId, identity);
   if (!project) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
 
-  if ((await countTaskRunsToday()) >= DAILY_AI_RUN_LIMIT) {
+  if ((await countTaskRunsToday(identity.userId)) >= DAILY_AI_RUN_LIMIT) {
     return Response.json(
       {
         error: `Daily AI limit reached (${DAILY_AI_RUN_LIMIT} runs/day). Try again tomorrow.`,
@@ -93,40 +61,24 @@ export async function POST(request: Request) {
 
   const handle = await tasks.trigger<typeof designAgent>(
     "design-agent",
+    { prompt, roomId },
     {
-      prompt,
-      roomId,
-    },
-    {
-      idempotencyKey: idempotencyKeyForRequest(
-        request,
-        identity.userId,
+      idempotencyKey: aiRunIdempotencyKey(request, {
+        userId: identity.userId,
         projectId,
         roomId,
-        prompt.trim(),
-      ),
+        prompt: prompt.trim(),
+      }),
       idempotencyKeyTTL: "24h",
     },
   );
 
-  try {
-    await createTaskRun(handle.id, projectId, identity.userId);
-  } catch (error) {
-    try {
-      await cancelRunWithRetry(handle.id);
-    } catch (cancelError) {
-      console.error("Failed to cancel an untracked design run", {
-        runId: handle.id,
-        error,
-        cancelError,
-      });
-    }
-
-    return Response.json(
-      { error: "Unable to record design run" },
-      { status: 500 },
-    );
-  }
+  const recordError = await recordRunOrCancel(
+    handle.id,
+    projectId,
+    identity.userId,
+  );
+  if (recordError) return recordError;
 
   return Response.json({ runId: handle.id });
 }
